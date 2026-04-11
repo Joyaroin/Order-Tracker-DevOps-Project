@@ -9,7 +9,9 @@
       "Bash(ls /Users/adhamsedik/Order-Tracker-DevOps-Project/k8s-learning/services/frontend/node_modules/.bin/tailwind*)",
       "Bash(npm ls:*)",
       "Bash(/Users/adhamsedik/Order-Tracker-DevOps-Project/k8s-learning/services/frontend/node_modules/.bin/tailwindcss init:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(git checkout:*)",
+      "Bash(gh pr create --title 'Add delete order functionality' --body ':*)"
     ]
   }
 }
