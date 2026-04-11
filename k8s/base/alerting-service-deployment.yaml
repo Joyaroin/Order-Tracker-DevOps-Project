@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alerting-service
+  labels:
+    app: alerting-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alerting-service
+  template:
+    metadata:
+      labels:
+        app: alerting-service
+    spec:
+      containers:
+        - name: alerting-service
+          image: alerting-service:latest
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: alerting-service-config
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
