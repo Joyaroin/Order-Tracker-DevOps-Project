@@ -1,8 +1,23 @@
+import { useState } from 'react';
 import usePolling from '../hooks/usePolling';
 
-export default function OrdersList() {
+export default function OrdersList({ onSuccess, onError }) {
   const { data, error, loading } = usePolling('/api/orders/orders', 5000);
   const orders = data?.orders ? [...data.orders].reverse() : [];
+  const [deleting, setDeleting] = useState(null);
+
+  const handleDelete = async (id) => {
+    setDeleting(id);
+    try {
+      const res = await fetch(`/api/orders/orders/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      onSuccess(`Order ${id} deleted`);
+    } catch (err) {
+      onError(`Failed to delete: ${err.message}`);
+    } finally {
+      setDeleting(null);
+    }
+  };
 
   return (
     <div className="bg-white rounded-lg shadow-sm p-6">
@@ -37,7 +52,8 @@ export default function OrdersList() {
                 <th className="pb-2 pr-4">Item</th>
                 <th className="pb-2 pr-4">Qty</th>
                 <th className="pb-2 pr-4">Time</th>
-                <th className="pb-2">Env</th>
+                <th className="pb-2 pr-4">Env</th>
+                <th className="pb-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -49,10 +65,19 @@ export default function OrdersList() {
                   <td className="py-2 pr-4 text-xs text-gray-400">
                     {new Date(order.createdAt).toLocaleString()}
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 pr-4">
                     <span className="inline-block bg-beige text-warm-gray text-xs px-2 py-0.5 rounded">
                       {order.environment}
                     </span>
+                  </td>
+                  <td className="py-2">
+                    <button
+                      onClick={() => handleDelete(order.id)}
+                      disabled={deleting === order.id}
+                      className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50 transition-colors"
+                    >
+                      {deleting === order.id ? '...' : 'Delete'}
+                    </button>
                   </td>
                 </tr>
               ))}

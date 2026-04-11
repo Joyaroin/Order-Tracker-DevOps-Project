@@ -26,7 +26,10 @@ function App() {
               onSuccess={(msg) => showToast(msg, 'success')}
               onError={(msg) => showToast(msg, 'error')}
             />
-            <OrdersList />
+            <OrdersList
+              onSuccess={(msg) => showToast(msg, 'success')}
+              onError={(msg) => showToast(msg, 'error')}
+            />
           </div>
           <AlertsFeed />
         </div>
