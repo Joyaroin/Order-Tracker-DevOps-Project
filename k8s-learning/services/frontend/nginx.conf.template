@@ -1,0 +1,34 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Serve React app — handle client-side routing
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Proxy order-api requests
+    location /api/orders/ {
+        proxy_pass ${ORDER_API_URL}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Proxy alerting-service requests
+    location /api/alerts/ {
+        proxy_pass ${ALERTING_SERVICE_URL}/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # Lightweight health check for K8s probes
+    location /nginx-health {
+        return 200 'ok';
+        add_header Content-Type text/plain;
+    }
+}
