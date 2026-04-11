@@ -52,6 +52,16 @@ app.get('/orders', (req, res) => {
   res.json({ environment: ENVIRONMENT, orders });
 });
 
+app.delete('/orders/:id', (req, res) => {
+  const index = orders.findIndex(o => o.id === req.params.id);
+  if (index === -1) {
+    return res.status(404).json({ error: 'Order not found' });
+  }
+  const [removed] = orders.splice(index, 1);
+  console.log(`[${ENVIRONMENT}] Order ${removed.id} deleted`);
+  res.json(removed);
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`[${ENVIRONMENT}] ${SERVICE_NAME} listening on port ${PORT}`);
