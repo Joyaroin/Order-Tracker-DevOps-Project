@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alerting-service-config
+data:
+  SERVICE_NAME: "alerting-service"
+  ENVIRONMENT: "hotfix-test-ephemeral-env"
+  PORT: "3001"

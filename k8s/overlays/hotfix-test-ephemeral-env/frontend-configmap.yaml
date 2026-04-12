@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+data:
+  REACT_APP_ENVIRONMENT: "hotfix-test-ephemeral-env"
+  ORDER_API_URL: "http://order-api:3000"
+  ALERTING_SERVICE_URL: "http://alerting-service:3001"
