@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: hotfix-test-ephemeral-env
+namespace: dev
 
 resources:
   - ../../base
@@ -12,13 +12,13 @@ resources:
 images:
   - name: order-api
     newName: 284495577709.dkr.ecr.us-east-2.amazonaws.com/order-api
-    newTag: "2d7d22a3dccc6a4842a90dd5b5ba2fad11ce0f9a"
+    newTag: "bd90c6aa34352c5b4b22ebe95fb6e163f990a194"
   - name: alerting-service
     newName: 284495577709.dkr.ecr.us-east-2.amazonaws.com/alerting-service
-    newTag: "2d7d22a3dccc6a4842a90dd5b5ba2fad11ce0f9a"
+    newTag: "bd90c6aa34352c5b4b22ebe95fb6e163f990a194"
   - name: frontend
     newName: 284495577709.dkr.ecr.us-east-2.amazonaws.com/frontend
-    newTag: "2d7d22a3dccc6a4842a90dd5b5ba2fad11ce0f9a"
+    newTag: "bd90c6aa34352c5b4b22ebe95fb6e163f990a194"
 
 patches:
   - target:
