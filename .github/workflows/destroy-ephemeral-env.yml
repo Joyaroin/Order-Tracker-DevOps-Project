@@ -1,0 +1,36 @@
+name: Destroy Ephemeral Environment
+
+on:
+  delete:
+
+jobs:
+  destroy-env:
+    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'hotfix/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set environment name
+        run: |
+          ENV_NAME="${{ github.event.ref }}"
+          ENV_NAME="${ENV_NAME//\//-}"
+          echo "ENV_NAME=$ENV_NAME" >> $GITHUB_ENV
+
+      - name: Remove overlay and push
+        run: |
+          if [ -d "k8s/overlays/${{ env.ENV_NAME }}" ]; then
+            rm -rf k8s/overlays/${{ env.ENV_NAME }}
+            git config user.name "github-actions"
+            git config user.email "github-actions@github.com"
+            git add -A
+            git commit -m "Tear down ephemeral environment ${{ env.ENV_NAME }}"
+            git push origin main
+          else
+            echo "Overlay for ${{ env.ENV_NAME }} not found, nothing to remove"
+          fi
