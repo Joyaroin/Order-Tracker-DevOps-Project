@@ -1,0 +1,55 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REGISTRY: 284495577709.dkr.ecr.us-east-2.amazonaws.com
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push order-api
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/order-api
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/order-api:1.0.0
+            ${{ env.ECR_REGISTRY }}/order-api:${{ github.sha }}
+
+      - name: Build and push alerting-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/alerting-service
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/alerting-service:1.0.0
+            ${{ env.ECR_REGISTRY }}/alerting-service:${{ github.sha }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/frontend
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/frontend:1.0.0
+            ${{ env.ECR_REGISTRY }}/frontend:${{ github.sha }}
