@@ -28,3 +28,10 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 2
+  - target:
+      kind: Service
+      name: frontend
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: LoadBalancer

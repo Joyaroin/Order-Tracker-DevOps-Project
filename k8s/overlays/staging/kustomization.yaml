@@ -19,3 +19,12 @@ images:
   - name: frontend
     newName: 284495577709.dkr.ecr.us-east-2.amazonaws.com/frontend
     newTag: "1.0.0"
+
+patches:
+  - target:
+      kind: Service
+      name: frontend
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: LoadBalancer
