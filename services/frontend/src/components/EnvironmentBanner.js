@@ -1,8 +1,8 @@
 import { ENVIRONMENT } from '../config';
 
-const isProduction = ['production', 'staging', 'prod'].includes(ENVIRONMENT.toLowerCase());
-
 export default function EnvironmentBanner() {
+  const isProduction = ['production', 'staging', 'prod'].includes(ENVIRONMENT.toLowerCase());
+
   return (
     <div
       className={`w-full px-6 py-3 text-center font-semibold tracking-wide ${
