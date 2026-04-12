@@ -74,8 +74,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add k8s/overlays/${{ env.ENV_NAME }}
-          git commit -m "Create ephemeral environment ${{ env.ENV_NAME }}"
-          git push origin main
+          git diff --cached --quiet && echo "No changes to commit" || (git commit -m "Create ephemeral environment ${{ env.ENV_NAME }}" && git push origin main)
 
       - name: Configure kubectl
         run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
