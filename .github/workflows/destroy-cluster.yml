@@ -34,8 +34,15 @@ jobs:
           echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
           echo "VPC ID: $VPC_ID"
 
-      - name: Delete load balancers in VPC
-        if: steps.vpc.outputs.vpc_id != ''
+      - name: Delete cluster via eksctl
+        run: |
+          eksctl delete cluster \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --wait
+
+      - name: Cleanup leftover load balancers and security groups
+        if: always() && steps.vpc.outputs.vpc_id != ''
         run: |
           VPC_ID="${{ steps.vpc.outputs.vpc_id }}"
 
@@ -69,31 +76,6 @@ jobs:
             echo "Deleting security group: $sg"
             aws ec2 delete-security-group --group-id $sg --region ${{ env.AWS_REGION }} 2>/dev/null || true
           done
-
-      - name: Delete cluster via CloudFormation
-        run: |
-          CLUSTER_STACK="eksctl-${{ env.CLUSTER_NAME }}-cluster"
-          NODEGROUP_STACK=$(aws cloudformation list-stacks --region ${{ env.AWS_REGION }} \
-            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
-            --query "StackSummaries[?starts_with(StackName, 'eksctl-${{ env.CLUSTER_NAME }}-nodegroup')].StackName | [0]" \
-            --output text)
-          echo "Nodegroup stack: $NODEGROUP_STACK"
-
-          # Disable termination protection
-          aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name $NODEGROUP_STACK --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name $CLUSTER_STACK --region ${{ env.AWS_REGION }} 2>/dev/null || true
-
-          # Delete nodegroup stack first (cluster stack depends on it)
-          echo "Deleting nodegroup stack..."
-          aws cloudformation delete-stack --stack-name $NODEGROUP_STACK --region ${{ env.AWS_REGION }}
-          aws cloudformation wait stack-delete-complete --stack-name $NODEGROUP_STACK --region ${{ env.AWS_REGION }}
-          echo "Nodegroup stack deleted."
-
-          # Delete cluster stack
-          echo "Deleting cluster stack..."
-          aws cloudformation delete-stack --stack-name $CLUSTER_STACK --region ${{ env.AWS_REGION }}
-          aws cloudformation wait stack-delete-complete --stack-name $CLUSTER_STACK --region ${{ env.AWS_REGION }}
-          echo "Cluster stack deleted."
 
       - name: Write job summary
         if: always()
