@@ -57,6 +57,9 @@ jobs:
           echo "Waiting for load balancers to finish deleting..."
           sleep 30
 
+      - name: Configure kubectl
+        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
+
       - name: Delete cluster
         run: eksctl delete cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
