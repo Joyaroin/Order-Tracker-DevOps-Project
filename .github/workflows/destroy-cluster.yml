@@ -41,10 +41,24 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --wait
 
-      - name: Cleanup leftover load balancers and security groups
+      - name: Cleanup leftover VPC dependencies and retry cluster stack delete
         if: always() && steps.vpc.outputs.vpc_id != ''
         run: |
           VPC_ID="${{ steps.vpc.outputs.vpc_id }}"
+          CLUSTER_STACK="eksctl-${{ env.CLUSTER_NAME }}-cluster"
+
+          vpc_exists() {
+            aws ec2 describe-vpcs \
+              --region ${{ env.AWS_REGION }} \
+              --vpc-ids "$VPC_ID" \
+              --query 'Vpcs[0].VpcId' \
+              --output text 2>/dev/null | grep -q "^$VPC_ID$"
+          }
+
+          if ! vpc_exists; then
+            echo "VPC $VPC_ID no longer exists, skipping dependency cleanup."
+            exit 0
+          fi
 
           # Classic load balancers
           LBS=$(aws elb describe-load-balancers --region ${{ env.AWS_REGION }} \
@@ -67,7 +81,70 @@ jobs:
           echo "Waiting for load balancers to finish deleting..."
           sleep 30
 
-          # Delete leftover security groups that block VPC deletion
+          # Delete NAT gateways before subnet cleanup.
+          NAT_GWS=$(aws ec2 describe-nat-gateways --region ${{ env.AWS_REGION }} \
+            --filter "Name=vpc-id,Values=$VPC_ID" \
+            --query "NatGateways[?State!='deleted'].NatGatewayId" \
+            --output text)
+          for nat in $NAT_GWS; do
+            echo "Deleting NAT gateway: $nat"
+            aws ec2 delete-nat-gateway --nat-gateway-id "$nat" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+          for nat in $NAT_GWS; do
+            echo "Waiting for NAT gateway deletion: $nat"
+            aws ec2 wait nat-gateway-deleted --nat-gateway-ids "$nat" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+
+          # Delete detachable network interfaces still left in the VPC.
+          ENIS=$(aws ec2 describe-network-interfaces --region ${{ env.AWS_REGION }} \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "NetworkInterfaces[?Status=='available'].NetworkInterfaceId" \
+            --output text)
+          for eni in $ENIS; do
+            echo "Deleting available ENI: $eni"
+            aws ec2 delete-network-interface --network-interface-id "$eni" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+
+          # Detach and delete internet gateways.
+          IGWS=$(aws ec2 describe-internet-gateways --region ${{ env.AWS_REGION }} \
+            --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
+            --query "InternetGateways[].InternetGatewayId" \
+            --output text)
+          for igw in $IGWS; do
+            echo "Detaching and deleting internet gateway: $igw"
+            aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$VPC_ID" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+            aws ec2 delete-internet-gateway --internet-gateway-id "$igw" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+
+          # Delete non-main route tables after removing explicit associations.
+          ROUTE_TABLES=$(aws ec2 describe-route-tables --region ${{ env.AWS_REGION }} \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "RouteTables[?Associations[?Main!=\`true\`]].RouteTableId" \
+            --output text)
+          for rtb in $ROUTE_TABLES; do
+            ASSOCIATIONS=$(aws ec2 describe-route-tables --region ${{ env.AWS_REGION }} \
+              --route-table-ids "$rtb" \
+              --query "RouteTables[0].Associations[?Main!=\`true\`].RouteTableAssociationId" \
+              --output text)
+            for assoc in $ASSOCIATIONS; do
+              echo "Disassociating route table association: $assoc"
+              aws ec2 disassociate-route-table --association-id "$assoc" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+            done
+            echo "Deleting route table: $rtb"
+            aws ec2 delete-route-table --route-table-id "$rtb" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+
+          # Delete subnets after load balancers, NAT gateways, and ENIs are gone.
+          SUBNETS=$(aws ec2 describe-subnets --region ${{ env.AWS_REGION }} \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "Subnets[].SubnetId" \
+            --output text)
+          for subnet in $SUBNETS; do
+            echo "Deleting subnet: $subnet"
+            aws ec2 delete-subnet --subnet-id "$subnet" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+
+          # Delete leftover security groups that block VPC deletion.
           SGs=$(aws ec2 describe-security-groups --region ${{ env.AWS_REGION }} \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query "SecurityGroups[?GroupName!='default'].GroupId" \
@@ -76,6 +153,19 @@ jobs:
             echo "Deleting security group: $sg"
             aws ec2 delete-security-group --group-id $sg --region ${{ env.AWS_REGION }} 2>/dev/null || true
           done
+
+          # Try deleting the VPC directly once dependencies are gone.
+          echo "Attempting direct VPC delete: $VPC_ID"
+          aws ec2 delete-vpc --vpc-id "$VPC_ID" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+          # Retry the cluster stack delete if it still exists and previously got stuck.
+          STACK_STATUS=$(aws cloudformation describe-stacks --stack-name "$CLUSTER_STACK" --region ${{ env.AWS_REGION }} \
+            --query "Stacks[0].StackStatus" --output text 2>/dev/null || true)
+          if [ -n "$STACK_STATUS" ] && [ "$STACK_STATUS" != "DELETE_COMPLETE" ]; then
+            echo "Retrying CloudFormation delete for stack: $CLUSTER_STACK (status: $STACK_STATUS)"
+            aws cloudformation delete-stack --stack-name "$CLUSTER_STACK" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+            aws cloudformation wait stack-delete-complete --stack-name "$CLUSTER_STACK" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          fi
 
       - name: Write job summary
         if: always()
