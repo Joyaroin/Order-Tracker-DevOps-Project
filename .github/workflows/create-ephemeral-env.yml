@@ -84,7 +84,7 @@ jobs:
         run: |
           echo "Waiting for LoadBalancer to be assigned..."
           for i in $(seq 1 24); do
-            URL=$(kubectl get svc frontend -n ${{ env.ENV_NAME }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+            URL=$(kubectl get svc frontend -n ${{ env.ENV_NAME }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
             if [ -n "$URL" ]; then
               echo "url=http://$URL" >> $GITHUB_OUTPUT
               echo "Found URL: http://$URL"
