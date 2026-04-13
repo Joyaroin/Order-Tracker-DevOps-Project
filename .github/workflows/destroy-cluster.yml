@@ -1,0 +1,70 @@
+name: Destroy Cluster
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-2
+  CLUSTER_NAME: k8s-learning
+
+jobs:
+  destroy-cluster:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install eksctl
+        run: |
+          curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin
+
+      - name: Get VPC ID
+        id: vpc
+        run: |
+          VPC_ID=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'cluster.resourcesVpcConfig.vpcId' --output text 2>/dev/null || true)
+          echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+          echo "VPC ID: $VPC_ID"
+
+      - name: Delete load balancers in VPC
+        if: steps.vpc.outputs.vpc_id != ''
+        run: |
+          VPC_ID="${{ steps.vpc.outputs.vpc_id }}"
+
+          # Classic load balancers
+          LBS=$(aws elb describe-load-balancers --region ${{ env.AWS_REGION }} \
+            --query "LoadBalancerDescriptions[?VPCId=='$VPC_ID'].LoadBalancerName" \
+            --output text)
+          for lb in $LBS; do
+            echo "Deleting classic LB: $lb"
+            aws elb delete-load-balancer --load-balancer-name $lb --region ${{ env.AWS_REGION }}
+          done
+
+          # ALB/NLB load balancers
+          ALBS=$(aws elbv2 describe-load-balancers --region ${{ env.AWS_REGION }} \
+            --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+            --output text)
+          for alb in $ALBS; do
+            echo "Deleting ALB/NLB: $alb"
+            aws elbv2 delete-load-balancer --load-balancer-arn $alb --region ${{ env.AWS_REGION }}
+          done
+
+          echo "Waiting for load balancers to finish deleting..."
+          sleep 30
+
+      - name: Delete cluster
+        run: eksctl delete cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Cluster Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster** | \`${{ env.CLUSTER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Region** | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
