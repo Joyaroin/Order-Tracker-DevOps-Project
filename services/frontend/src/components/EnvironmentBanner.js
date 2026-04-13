@@ -12,7 +12,7 @@ export default function EnvironmentBanner() {
       }`}
     >
       <span className="text-sm uppercase">
-        Environment: {ENVIRONMENT}
+        Environment: {ENVIRONMENT.toUpperCase()}
       </span>
     </div>
   );
