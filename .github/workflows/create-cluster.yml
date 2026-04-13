@@ -49,12 +49,60 @@ jobs:
 
       - name: Install ArgoCD
         run: |
-          kubectl create namespace argocd
+          kubectl get namespace argocd >/dev/null 2>&1 || kubectl create namespace argocd
           kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side
           kubectl wait --for=condition=available --timeout=120s deployment --all -n argocd
 
+      - name: Expose ArgoCD server
+        id: argocd-url
+        run: |
+          kubectl patch svc argocd-server -n argocd -p '{"spec":{"type":"LoadBalancer"}}'
+
+          echo "Waiting for ArgoCD LoadBalancer hostname..."
+          for i in $(seq 1 40); do
+            HOSTNAME=$(kubectl get svc argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [ -n "$HOSTNAME" ]; then
+              echo "url=https://$HOSTNAME" >> $GITHUB_OUTPUT
+              echo "Found ArgoCD URL: https://$HOSTNAME"
+              exit 0
+            fi
+            echo "Attempt $i/40 - not ready yet, waiting 15s..."
+            sleep 15
+          done
+
+          echo "ArgoCD LoadBalancer hostname was not assigned within the timeout."
+          exit 1
+
       - name: Apply ApplicationSet
         run: kubectl apply -f k8s/argocd/applicationset.yaml
+
+      - name: Wait for frontend URLs
+        id: frontend-urls
+        run: |
+          wait_for_frontend_url() {
+            NAMESPACE="$1"
+
+            echo "Waiting for frontend service in namespace: $NAMESPACE" >&2
+            for i in $(seq 1 40); do
+              HOSTNAME=$(kubectl get svc frontend -n "$NAMESPACE" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+              if [ -n "$HOSTNAME" ]; then
+                echo "Found frontend URL for $NAMESPACE: http://$HOSTNAME" >&2
+                printf '%s' "http://$HOSTNAME"
+                return 0
+              fi
+              echo "Attempt $i/40 for $NAMESPACE - not ready yet, waiting 15s..." >&2
+              sleep 15
+            done
+
+            echo "Frontend LoadBalancer hostname was not assigned in namespace $NAMESPACE within the timeout." >&2
+            return 1
+          }
+
+          DEV_URL=$(wait_for_frontend_url dev)
+          echo "dev_url=$DEV_URL" >> $GITHUB_OUTPUT
+
+          STAGING_URL=$(wait_for_frontend_url staging)
+          echo "staging_url=$STAGING_URL" >> $GITHUB_OUTPUT
 
       - name: Get ArgoCD admin password
         id: argocd-password
@@ -71,6 +119,9 @@ jobs:
           echo "| **Region** | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Nodes** | ${{ github.event.inputs.node_count }} x \`${{ github.event.inputs.node_type }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD** | Installed |" >> $GITHUB_STEP_SUMMARY
+          echo "| **ArgoCD URL** | ${{ steps.argocd-url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD password** | \`${{ steps.argocd-password.outputs.password }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Dev frontend** | ${{ steps.frontend-urls.outputs.dev_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Staging frontend** | ${{ steps.frontend-urls.outputs.staging_url }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "> Run \`aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}\` to connect locally."
