@@ -57,10 +57,24 @@ jobs:
           echo "Waiting for load balancers to finish deleting..."
           sleep 30
 
+          # Delete leftover security groups that block VPC deletion
+          SGs=$(aws ec2 describe-security-groups --region ${{ env.AWS_REGION }} \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query "SecurityGroups[?GroupName!='default'].GroupId" \
+            --output text)
+          for sg in $SGs; do
+            echo "Deleting security group: $sg"
+            aws ec2 delete-security-group --group-id $sg --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          done
+
       - name: Delete cluster via CloudFormation
         run: |
-          NODEGROUP_STACK="eksctl-${{ env.CLUSTER_NAME }}-nodegroup-workers"
           CLUSTER_STACK="eksctl-${{ env.CLUSTER_NAME }}-cluster"
+          NODEGROUP_STACK=$(aws cloudformation list-stacks --region ${{ env.AWS_REGION }} \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query "StackSummaries[?starts_with(StackName, 'eksctl-${{ env.CLUSTER_NAME }}-nodegroup')].StackName | [0]" \
+            --output text)
+          echo "Nodegroup stack: $NODEGROUP_STACK"
 
           # Disable termination protection
           aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name $NODEGROUP_STACK --region ${{ env.AWS_REGION }} 2>/dev/null || true
