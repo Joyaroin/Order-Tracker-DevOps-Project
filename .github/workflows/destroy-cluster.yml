@@ -35,6 +35,8 @@ jobs:
           echo "VPC ID: $VPC_ID"
 
       - name: Delete cluster via eksctl
+        id: eksctl-delete
+        continue-on-error: true
         run: |
           eksctl delete cluster \
             --name ${{ env.CLUSTER_NAME }} \
@@ -167,6 +169,34 @@ jobs:
             aws cloudformation wait stack-delete-complete --stack-name "$CLUSTER_STACK" --region ${{ env.AWS_REGION }} 2>/dev/null || true
           fi
 
+      - name: Verify cluster resources are gone
+        run: |
+          CLUSTER_EXISTS="false"
+          STACK_EXISTS="false"
+          VPC_EXISTS="false"
+
+          if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            CLUSTER_EXISTS="true"
+          fi
+
+          if aws cloudformation describe-stacks --stack-name "eksctl-${{ env.CLUSTER_NAME }}-cluster" --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            STACK_EXISTS="true"
+          fi
+
+          if [ -n "${{ steps.vpc.outputs.vpc_id }}" ] && aws ec2 describe-vpcs --vpc-ids "${{ steps.vpc.outputs.vpc_id }}" --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+            VPC_EXISTS="true"
+          fi
+
+          echo "eksctl delete step outcome: ${{ steps.eksctl-delete.outcome }}"
+          echo "Cluster exists: $CLUSTER_EXISTS"
+          echo "Cluster stack exists: $STACK_EXISTS"
+          echo "VPC exists: $VPC_EXISTS"
+
+          if [ "$CLUSTER_EXISTS" = "true" ] || [ "$STACK_EXISTS" = "true" ] || [ "$VPC_EXISTS" = "true" ]; then
+            echo "Cluster teardown is incomplete."
+            exit 1
+          fi
+
       - name: Write job summary
         if: always()
         run: |
@@ -175,3 +205,4 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Cluster** | \`${{ env.CLUSTER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Region** | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **eksctl delete step** | ${{ steps.eksctl-delete.outcome }} |" >> $GITHUB_STEP_SUMMARY
