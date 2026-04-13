@@ -94,6 +94,23 @@ jobs:
             sleep 15
           done
 
+      - name: Write job summary
+        if: always()
+        run: |
+          if [ -n "${{ steps.get-url.outputs.url }}" ]; then
+            echo "## Ephemeral Environment Ready" >> $GITHUB_STEP_SUMMARY
+            echo "| | |" >> $GITHUB_STEP_SUMMARY
+            echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+            echo "| **Environment** | \`${{ env.ENV_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "| **URL** | ${{ steps.get-url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> This environment will be automatically destroyed when the branch is deleted." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Ephemeral Environment - URL Not Available" >> $GITHUB_STEP_SUMMARY
+            echo "LoadBalancer URL was not assigned within the timeout. Check the cluster manually." >> $GITHUB_STEP_SUMMARY
+          fi
+
       - name: Post PR comment with environment URL
         if: steps.get-url.outputs.url != ''
         run: |
