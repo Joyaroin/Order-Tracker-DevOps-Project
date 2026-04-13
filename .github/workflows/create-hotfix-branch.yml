@@ -1,0 +1,33 @@
+name: Create Hotfix Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      hotfix_name:
+        description: "Hotfix name (e.g. 123, fix-login, payment-bug)"
+        required: true
+
+jobs:
+  create-branch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Create hotfix branch
+        run: |
+          BRANCH="hotfix/${{ github.event.inputs.hotfix_name }}"
+          git checkout -b $BRANCH
+          git push origin $BRANCH
+          echo "## Hotfix Branch Created" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`$BRANCH\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Based on** | \`main\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> Push a commit to this branch to trigger the ephemeral environment workflow." >> $GITHUB_STEP_SUMMARY
