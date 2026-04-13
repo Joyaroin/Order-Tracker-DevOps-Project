@@ -57,11 +57,26 @@ jobs:
           echo "Waiting for load balancers to finish deleting..."
           sleep 30
 
-      - name: Configure kubectl
-        run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}
+      - name: Delete cluster via CloudFormation
+        run: |
+          NODEGROUP_STACK="eksctl-${{ env.CLUSTER_NAME }}-nodegroup-workers"
+          CLUSTER_STACK="eksctl-${{ env.CLUSTER_NAME }}-cluster"
 
-      - name: Delete cluster
-        run: eksctl delete cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+          # Disable termination protection
+          aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name $NODEGROUP_STACK --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name $CLUSTER_STACK --region ${{ env.AWS_REGION }} 2>/dev/null || true
+
+          # Delete nodegroup stack first (cluster stack depends on it)
+          echo "Deleting nodegroup stack..."
+          aws cloudformation delete-stack --stack-name $NODEGROUP_STACK --region ${{ env.AWS_REGION }}
+          aws cloudformation wait stack-delete-complete --stack-name $NODEGROUP_STACK --region ${{ env.AWS_REGION }}
+          echo "Nodegroup stack deleted."
+
+          # Delete cluster stack
+          echo "Deleting cluster stack..."
+          aws cloudformation delete-stack --stack-name $CLUSTER_STACK --region ${{ env.AWS_REGION }}
+          aws cloudformation wait stack-delete-complete --stack-name $CLUSTER_STACK --region ${{ env.AWS_REGION }}
+          echo "Cluster stack deleted."
 
       - name: Write job summary
         if: always()
