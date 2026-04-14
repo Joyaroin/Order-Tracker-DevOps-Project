@@ -1,0 +1,52 @@
+output "region" {
+  description = "AWS region."
+  value       = var.region
+}
+
+output "cluster_name" {
+  description = "EKS cluster name."
+  value       = module.eks.cluster_name
+}
+
+output "cluster_endpoint" {
+  description = "EKS API server endpoint."
+  value       = module.eks.cluster_endpoint
+}
+
+output "cluster_certificate_authority_data" {
+  description = "Base64-encoded cluster CA cert."
+  value       = module.eks.cluster_certificate_authority_data
+  sensitive   = true
+}
+
+output "cluster_security_group_id" {
+  description = "Security group attached to the cluster control plane."
+  value       = module.eks.cluster_security_group_id
+}
+
+output "vpc_id" {
+  description = "VPC ID."
+  value       = module.vpc.vpc_id
+}
+
+output "private_subnet_ids" {
+  description = "Private subnet IDs used by the node group."
+  value       = module.vpc.private_subnets
+}
+
+output "public_subnet_ids" {
+  description = "Public subnet IDs used by ELBs."
+  value       = module.vpc.public_subnets
+}
+
+output "ecr_repository_urls" {
+  description = "Map of service name to ECR repository URL."
+  value = {
+    for name, repo in aws_ecr_repository.app : name => repo.repository_url
+  }
+}
+
+output "kubeconfig_command" {
+  description = "Command to configure kubectl against the new cluster."
+  value       = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
+}

@@ -8,7 +8,7 @@ on:
         required: false
         default: "t3.medium"
       node_count:
-        description: "Number of nodes"
+        description: "Desired number of nodes"
         required: false
         default: "2"
 
@@ -16,6 +16,9 @@ env:
   AWS_REGION: us-east-2
   CLUSTER_NAME: k8s-learning
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
+  TF_WORKING_DIR: infra/terraform
 
 jobs:
   create-cluster:
@@ -34,21 +37,42 @@ jobs:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install eksctl
-        run: |
-          curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
-          sudo mv /tmp/eksctl /usr/local/bin
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
 
-      - name: Create EKS cluster
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          eksctl create cluster \
-            --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --nodegroup-name standard-workers \
-            --node-type ${{ github.event.inputs.node_type }} \
-            --nodes ${{ github.event.inputs.node_count }} \
-            --nodes-min 1 \
-            --nodes-max 3
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=order-tracker/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${TF_STATE_LOCK_TABLE}" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform apply -auto-approve \
+            -var="region=${AWS_REGION}" \
+            -var="cluster_name=${CLUSTER_NAME}" \
+            -var='node_instance_types=["${{ github.event.inputs.node_type }}"]' \
+            -var="node_desired_size=${{ github.event.inputs.node_count }}"
+
+      - name: Capture Terraform outputs
+        id: tf-out
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
+          echo "region=$(terraform output -raw region)" >> $GITHUB_OUTPUT
+
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ steps.tf-out.outputs.region }} \
+            --name ${{ steps.tf-out.outputs.cluster_name }}
 
       - name: Install ArgoCD
         run: |
@@ -118,8 +142,9 @@ jobs:
           echo "## Cluster Ready" >> $GITHUB_STEP_SUMMARY
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cluster** | \`${{ env.CLUSTER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Region** | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster** | \`${{ steps.tf-out.outputs.cluster_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Region** | \`${{ steps.tf-out.outputs.region }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Provisioned by** | Terraform |" >> $GITHUB_STEP_SUMMARY
           echo "| **Nodes** | ${{ github.event.inputs.node_count }} x \`${{ github.event.inputs.node_type }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD** | Installed |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD URL** | ${{ steps.argocd-url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
@@ -127,4 +152,4 @@ jobs:
           echo "| **Dev frontend** | ${{ steps.frontend-urls.outputs.dev_url }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Staging frontend** | ${{ steps.frontend-urls.outputs.staging_url }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> Run \`aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.CLUSTER_NAME }}\` to connect locally."
+          echo "> Run \`aws eks update-kubeconfig --region ${{ steps.tf-out.outputs.region }} --name ${{ steps.tf-out.outputs.cluster_name }}\` to connect locally." >> $GITHUB_STEP_SUMMARY
