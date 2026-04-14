@@ -7,6 +7,9 @@ env:
   AWS_REGION: us-east-2
   CLUSTER_NAME: k8s-learning
   AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
+  TF_WORKING_DIR: infra/terraform
 
 jobs:
   destroy-cluster:
@@ -16,186 +19,73 @@ jobs:
       contents: read
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ env.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install eksctl
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.5
+
+      - name: Terraform Init
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          curl -sL "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz" | tar xz -C /tmp
-          sudo mv /tmp/eksctl /usr/local/bin
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=order-tracker/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${TF_STATE_LOCK_TABLE}" \
+            -backend-config="encrypt=true"
 
-      - name: Get VPC ID
-        id: vpc
+      # Cluster-managed ELBs (frontend/staging/argocd LoadBalancers) create
+      # AWS load balancers outside Terraform state. If they're still around at
+      # destroy time they hold ENIs in the VPC and block subnet deletion.
+      # Delete any ELBs attached to the cluster's VPC before tearing down.
+      - name: Pre-clean cluster-managed load balancers
         run: |
-          VPC_ID=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'cluster.resourcesVpcConfig.vpcId' --output text 2>/dev/null || true)
-          echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
-          echo "VPC ID: $VPC_ID"
+          VPC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" \
+            --query 'cluster.resourcesVpcConfig.vpcId' --output text 2>/dev/null || true)
 
-      - name: Delete cluster via eksctl
-        id: eksctl-delete
-        continue-on-error: true
-        run: |
-          eksctl delete cluster \
-            --name ${{ env.CLUSTER_NAME }} \
-            --region ${{ env.AWS_REGION }} \
-            --wait
-
-      - name: Cleanup leftover VPC dependencies and retry cluster stack delete
-        if: always() && steps.vpc.outputs.vpc_id != ''
-        run: |
-          VPC_ID="${{ steps.vpc.outputs.vpc_id }}"
-          CLUSTER_STACK="eksctl-${{ env.CLUSTER_NAME }}-cluster"
-
-          vpc_exists() {
-            aws ec2 describe-vpcs \
-              --region ${{ env.AWS_REGION }} \
-              --vpc-ids "$VPC_ID" \
-              --query 'Vpcs[0].VpcId' \
-              --output text 2>/dev/null | grep -q "^$VPC_ID$"
-          }
-
-          if ! vpc_exists; then
-            echo "VPC $VPC_ID no longer exists, skipping dependency cleanup."
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "Cluster not found or already gone — nothing to pre-clean."
             exit 0
           fi
 
-          # Classic load balancers
-          LBS=$(aws elb describe-load-balancers --region ${{ env.AWS_REGION }} \
+          echo "Found cluster VPC: $VPC_ID"
+
+          CLBS=$(aws elb describe-load-balancers --region "$AWS_REGION" \
             --query "LoadBalancerDescriptions[?VPCId=='$VPC_ID'].LoadBalancerName" \
             --output text)
-          for lb in $LBS; do
+          for lb in $CLBS; do
             echo "Deleting classic LB: $lb"
-            aws elb delete-load-balancer --load-balancer-name $lb --region ${{ env.AWS_REGION }}
+            aws elb delete-load-balancer --load-balancer-name "$lb" --region "$AWS_REGION" || true
           done
 
-          # ALB/NLB load balancers
-          ALBS=$(aws elbv2 describe-load-balancers --region ${{ env.AWS_REGION }} \
+          ALBS=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" \
             --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
             --output text)
           for alb in $ALBS; do
             echo "Deleting ALB/NLB: $alb"
-            aws elbv2 delete-load-balancer --load-balancer-arn $alb --region ${{ env.AWS_REGION }}
+            aws elbv2 delete-load-balancer --load-balancer-arn "$alb" --region "$AWS_REGION" || true
           done
 
-          echo "Waiting for load balancers to finish deleting..."
-          sleep 30
-
-          # Delete NAT gateways before subnet cleanup.
-          NAT_GWS=$(aws ec2 describe-nat-gateways --region ${{ env.AWS_REGION }} \
-            --filter "Name=vpc-id,Values=$VPC_ID" \
-            --query "NatGateways[?State!='deleted'].NatGatewayId" \
-            --output text)
-          for nat in $NAT_GWS; do
-            echo "Deleting NAT gateway: $nat"
-            aws ec2 delete-nat-gateway --nat-gateway-id "$nat" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          done
-          for nat in $NAT_GWS; do
-            echo "Waiting for NAT gateway deletion: $nat"
-            aws ec2 wait nat-gateway-deleted --nat-gateway-ids "$nat" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          done
-
-          # Delete detachable network interfaces still left in the VPC.
-          ENIS=$(aws ec2 describe-network-interfaces --region ${{ env.AWS_REGION }} \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "NetworkInterfaces[?Status=='available'].NetworkInterfaceId" \
-            --output text)
-          for eni in $ENIS; do
-            echo "Deleting available ENI: $eni"
-            aws ec2 delete-network-interface --network-interface-id "$eni" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          done
-
-          # Detach and delete internet gateways.
-          IGWS=$(aws ec2 describe-internet-gateways --region ${{ env.AWS_REGION }} \
-            --filters "Name=attachment.vpc-id,Values=$VPC_ID" \
-            --query "InternetGateways[].InternetGatewayId" \
-            --output text)
-          for igw in $IGWS; do
-            echo "Detaching and deleting internet gateway: $igw"
-            aws ec2 detach-internet-gateway --internet-gateway-id "$igw" --vpc-id "$VPC_ID" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-            aws ec2 delete-internet-gateway --internet-gateway-id "$igw" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          done
-
-          # Delete non-main route tables after removing explicit associations.
-          ROUTE_TABLES=$(aws ec2 describe-route-tables --region ${{ env.AWS_REGION }} \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "RouteTables[?Associations[?Main!=\`true\`]].RouteTableId" \
-            --output text)
-          for rtb in $ROUTE_TABLES; do
-            ASSOCIATIONS=$(aws ec2 describe-route-tables --region ${{ env.AWS_REGION }} \
-              --route-table-ids "$rtb" \
-              --query "RouteTables[0].Associations[?Main!=\`true\`].RouteTableAssociationId" \
-              --output text)
-            for assoc in $ASSOCIATIONS; do
-              echo "Disassociating route table association: $assoc"
-              aws ec2 disassociate-route-table --association-id "$assoc" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-            done
-            echo "Deleting route table: $rtb"
-            aws ec2 delete-route-table --route-table-id "$rtb" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          done
-
-          # Delete subnets after load balancers, NAT gateways, and ENIs are gone.
-          SUBNETS=$(aws ec2 describe-subnets --region ${{ env.AWS_REGION }} \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "Subnets[].SubnetId" \
-            --output text)
-          for subnet in $SUBNETS; do
-            echo "Deleting subnet: $subnet"
-            aws ec2 delete-subnet --subnet-id "$subnet" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          done
-
-          # Delete leftover security groups that block VPC deletion.
-          SGs=$(aws ec2 describe-security-groups --region ${{ env.AWS_REGION }} \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query "SecurityGroups[?GroupName!='default'].GroupId" \
-            --output text)
-          for sg in $SGs; do
-            echo "Deleting security group: $sg"
-            aws ec2 delete-security-group --group-id $sg --region ${{ env.AWS_REGION }} 2>/dev/null || true
-          done
-
-          # Try deleting the VPC directly once dependencies are gone.
-          echo "Attempting direct VPC delete: $VPC_ID"
-          aws ec2 delete-vpc --vpc-id "$VPC_ID" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-
-          # Retry the cluster stack delete if it still exists and previously got stuck.
-          STACK_STATUS=$(aws cloudformation describe-stacks --stack-name "$CLUSTER_STACK" --region ${{ env.AWS_REGION }} \
-            --query "Stacks[0].StackStatus" --output text 2>/dev/null || true)
-          if [ -n "$STACK_STATUS" ] && [ "$STACK_STATUS" != "DELETE_COMPLETE" ]; then
-            echo "Retrying CloudFormation delete for stack: $CLUSTER_STACK (status: $STACK_STATUS)"
-            aws cloudformation delete-stack --stack-name "$CLUSTER_STACK" --region ${{ env.AWS_REGION }} 2>/dev/null || true
-            aws cloudformation wait stack-delete-complete --stack-name "$CLUSTER_STACK" --region ${{ env.AWS_REGION }} 2>/dev/null || true
+          if [ -n "$CLBS" ] || [ -n "$ALBS" ]; then
+            echo "Waiting 45s for load balancers and their ENIs to clear..."
+            sleep 45
           fi
 
-      - name: Verify cluster resources are gone
+      - name: Terraform Destroy
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          CLUSTER_EXISTS="false"
-          STACK_EXISTS="false"
-          VPC_EXISTS="false"
-
-          if aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
-            CLUSTER_EXISTS="true"
-          fi
-
-          if aws cloudformation describe-stacks --stack-name "eksctl-${{ env.CLUSTER_NAME }}-cluster" --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
-            STACK_EXISTS="true"
-          fi
-
-          if [ -n "${{ steps.vpc.outputs.vpc_id }}" ] && aws ec2 describe-vpcs --vpc-ids "${{ steps.vpc.outputs.vpc_id }}" --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
-            VPC_EXISTS="true"
-          fi
-
-          echo "eksctl delete step outcome: ${{ steps.eksctl-delete.outcome }}"
-          echo "Cluster exists: $CLUSTER_EXISTS"
-          echo "Cluster stack exists: $STACK_EXISTS"
-          echo "VPC exists: $VPC_EXISTS"
-
-          if [ "$CLUSTER_EXISTS" = "true" ] || [ "$STACK_EXISTS" = "true" ] || [ "$VPC_EXISTS" = "true" ]; then
-            echo "Cluster teardown is incomplete."
-            exit 1
-          fi
+          terraform destroy -auto-approve \
+            -var="region=${AWS_REGION}" \
+            -var="cluster_name=${CLUSTER_NAME}"
 
       - name: Write job summary
         if: always()
@@ -205,4 +95,4 @@ jobs:
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Cluster** | \`${{ env.CLUSTER_NAME }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Region** | \`${{ env.AWS_REGION }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **eksctl delete step** | ${{ steps.eksctl-delete.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Destroyed by** | Terraform |" >> $GITHUB_STEP_SUMMARY

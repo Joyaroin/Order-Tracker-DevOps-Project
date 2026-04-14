@@ -1,0 +1,12 @@
+# Copy this file to terraform.tfvars and adjust as needed.
+# Defaults in variables.tf match the existing project, so most users can leave these empty.
+
+region          = "us-east-2"
+project_name    = "order-tracker"
+cluster_name    = "k8s-learning"
+cluster_version = "1.30"
+
+node_instance_types = ["t3.medium"]
+node_desired_size   = 2
+node_min_size       = 1
+node_max_size       = 3
