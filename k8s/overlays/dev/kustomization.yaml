@@ -12,13 +12,13 @@ resources:
 images:
   - name: order-api
     newName: 284495577709.dkr.ecr.us-east-2.amazonaws.com/order-api
-    newTag: "afcd46cc04d2cb95b18d792a8fc18264241204c3"
+    newTag: "f7147b0269ab82ce536e643c8b1b296b1513c6e4"
   - name: alerting-service
     newName: 284495577709.dkr.ecr.us-east-2.amazonaws.com/alerting-service
-    newTag: "afcd46cc04d2cb95b18d792a8fc18264241204c3"
+    newTag: "f7147b0269ab82ce536e643c8b1b296b1513c6e4"
   - name: frontend
     newName: 284495577709.dkr.ecr.us-east-2.amazonaws.com/frontend
-    newTag: "afcd46cc04d2cb95b18d792a8fc18264241204c3"
+    newTag: "f7147b0269ab82ce536e643c8b1b296b1513c6e4"
 
 patches:
   - target:
