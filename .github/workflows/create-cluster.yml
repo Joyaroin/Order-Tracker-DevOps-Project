@@ -118,6 +118,10 @@ jobs:
               --dry-run=client -o yaml | kubectl apply -f -
           done
 
+      - name: Set default storage class
+        run: |
+          kubectl annotate storageclass gp2 storageclass.kubernetes.io/is-default-class=true --overwrite
+
       - name: Apply ArgoCD applications
         run: kubectl apply -k k8s/argocd
 
