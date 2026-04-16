@@ -22,6 +22,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: alerting-service-config
+            - secretRef:
+                name: db-credentials
           readinessProbe:
             httpGet:
               path: /health

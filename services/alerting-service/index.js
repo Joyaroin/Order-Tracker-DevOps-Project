@@ -1,5 +1,6 @@
 const express = require('express');
 const { Kafka, logLevel } = require('kafkajs');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(express.json());
@@ -10,6 +11,14 @@ const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'localhost:9092').split(',')
 const KAFKA_TOPIC = process.env.KAFKA_TOPIC || `orders-${ENVIRONMENT}`;
 const KAFKA_GROUP_ID = process.env.KAFKA_GROUP_ID || `alerting-service-${ENVIRONMENT}`;
 
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: Number.parseInt(process.env.DB_PORT || '5432', 10),
+  user: process.env.DB_USER || 'ordertracker',
+  password: process.env.DB_PASSWORD || 'devpassword123',
+  database: process.env.DB_NAME || 'ordertracker',
+});
+
 const kafka = new Kafka({
   clientId: `alerting-service-${ENVIRONMENT}`,
   brokers: KAFKA_BROKERS,
@@ -17,7 +26,6 @@ const kafka = new Kafka({
 });
 
 const consumer = kafka.consumer({ groupId: KAFKA_GROUP_ID });
-const alerts = [];
 let consumerReady = false;
 let consumerStarted = false;
 let restartTimer = null;
@@ -46,19 +54,26 @@ async function startConsumer() {
     await consumer.run({
       eachMessage: async ({ topic, partition, message }) => {
         const event = JSON.parse(message.value.toString());
-        const alert = {
-          id: `ALT-${Date.now()}`,
-          type: event.type,
-          orderId: event.orderId,
-          item: event.item,
-          receivedAt: new Date().toISOString(),
-          environment: ENVIRONMENT,
-          source: `${topic} (partition ${partition})`,
-        };
-        alerts.push(alert);
-        console.log(
-          `[${ENVIRONMENT}] Alert from Kafka: ${alert.type} for order ${alert.orderId} via ${topic}`
-        );
+
+        try {
+          await pool.query(
+            `INSERT INTO alerts (id, type, order_id, item, environment, source)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              `ALT-${Date.now()}`,
+              event.type,
+              event.orderId,
+              event.item,
+              ENVIRONMENT,
+              `${topic} (partition ${partition})`,
+            ]
+          );
+          console.log(
+            `[${ENVIRONMENT}] Alert saved: ${event.type} for order ${event.orderId} via ${topic}`
+          );
+        } catch (err) {
+          console.error(`[${ENVIRONMENT}] Alert DB insert failed: ${err.message}`);
+        }
       },
     });
   } catch (err) {
@@ -76,7 +91,7 @@ async function startConsumer() {
   }
 }
 
-consumer.on(consumer.events.CRASH, async () => {
+consumer.on(consumer.events.CRASH, () => {
   consumerReady = false;
   consumerStarted = false;
   scheduleConsumerRestart();
@@ -89,35 +104,74 @@ consumer.on(consumer.events.DISCONNECT, () => {
 
 startConsumer();
 
-app.get('/health', (req, res) => {
+pool
+  .query('SELECT NOW()')
+  .then(() => console.log(`[${ENVIRONMENT}] PostgreSQL connected`))
+  .catch((err) => console.error(`[${ENVIRONMENT}] PostgreSQL failed: ${err.message}`));
+
+async function getDbHealth() {
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+app.get('/health', async (req, res) => {
+  const dbHealthy = await getDbHealth();
+  const countResult = await pool
+    .query('SELECT COUNT(*) FROM alerts')
+    .catch(() => ({ rows: [{ count: '0' }] }));
+
   res.json({
-    status: 'healthy',
+    status: dbHealthy && consumerReady ? 'healthy' : 'degraded',
     service: SERVICE_NAME,
     environment: ENVIRONMENT,
     kafkaConnected: consumerReady,
     kafkaTopic: KAFKA_TOPIC,
     kafkaGroupId: KAFKA_GROUP_ID,
-    alertCount: alerts.length,
+    dbConnected: dbHealthy,
+    alertCount: Number.parseInt(countResult.rows[0].count, 10),
   });
 });
 
-app.post('/alerts', (req, res) => {
-  const alert = {
-    id: `ALT-${Date.now()}`,
-    type: req.body.type,
-    orderId: req.body.orderId,
-    item: req.body.item,
-    receivedAt: new Date().toISOString(),
-    environment: ENVIRONMENT,
-    source: 'HTTP',
-  };
-  alerts.push(alert);
-  console.log(`[${ENVIRONMENT}] Alert via HTTP: ${alert.type} for order ${alert.orderId}`);
-  res.status(201).json(alert);
+app.post('/alerts', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `INSERT INTO alerts (id, type, order_id, item, environment, source)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, type, order_id AS "orderId", item, environment, source, received_at AS "receivedAt"`,
+      [
+        `ALT-${Date.now()}`,
+        req.body.type,
+        req.body.orderId,
+        req.body.item,
+        ENVIRONMENT,
+        'HTTP',
+      ]
+    );
+
+    console.log(`[${ENVIRONMENT}] Alert via HTTP: ${req.body.type} for order ${req.body.orderId}`);
+    return res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error(`[${ENVIRONMENT}] Failed to save HTTP alert: ${err.message}`);
+    return res.status(500).json({ error: 'Failed to save alert' });
+  }
 });
 
-app.get('/alerts', (req, res) => {
-  res.json({ environment: ENVIRONMENT, alerts });
+app.get('/alerts', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, type, order_id AS "orderId", item, environment, source, received_at AS "receivedAt"
+       FROM alerts
+       ORDER BY received_at DESC`
+    );
+    return res.json({ environment: ENVIRONMENT, alerts: result.rows });
+  } catch (err) {
+    console.error(`[${ENVIRONMENT}] Failed to fetch alerts: ${err.message}`);
+    return res.status(500).json({ error: 'Failed to fetch alerts' });
+  }
 });
 
 const PORT = process.env.PORT || 3001;

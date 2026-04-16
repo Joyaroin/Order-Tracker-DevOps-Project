@@ -1,0 +1,53 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgres-staging
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: postgresql
+    targetRevision: 18.5.21
+    helm:
+      releaseName: postgres
+      values: |
+        auth:
+          username: ordertracker
+          database: ordertracker
+          existingSecret: db-credentials
+          secretKeys:
+            adminPasswordKey: DB_PASSWORD
+            userPasswordKey: DB_PASSWORD
+        primary:
+          persistence:
+            size: 1Gi
+          initdb:
+            scripts:
+              schema.sql: |
+                CREATE TABLE IF NOT EXISTS orders (
+                  id VARCHAR(50) PRIMARY KEY,
+                  item VARCHAR(255) NOT NULL,
+                  quantity INTEGER NOT NULL,
+                  environment VARCHAR(50) NOT NULL,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS alerts (
+                  id VARCHAR(50) PRIMARY KEY,
+                  type VARCHAR(50) NOT NULL,
+                  order_id VARCHAR(50) REFERENCES orders(id) ON DELETE SET NULL,
+                  item VARCHAR(255),
+                  environment VARCHAR(50) NOT NULL,
+                  source VARCHAR(100),
+                  received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

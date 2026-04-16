@@ -9,3 +9,7 @@ data:
   ALERTING_SERVICE_URL: "http://alerting-service:3001"
   KAFKA_BROKERS: "kafka.kafka.svc.cluster.local:9092"
   KAFKA_TOPIC: "orders-staging"
+  DB_HOST: "postgres-postgresql.staging.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_USER: "ordertracker"
+  DB_NAME: "ordertracker"

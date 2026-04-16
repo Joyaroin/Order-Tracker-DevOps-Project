@@ -1,5 +1,6 @@
 const express = require('express');
 const { Kafka, logLevel } = require('kafkajs');
+const { Pool } = require('pg');
 
 const app = express();
 app.use(express.json());
@@ -8,6 +9,14 @@ const SERVICE_NAME = process.env.SERVICE_NAME || 'order-api';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'unknown';
 const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'localhost:9092').split(',');
 const KAFKA_TOPIC = process.env.KAFKA_TOPIC || `orders-${ENVIRONMENT}`;
+
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: Number.parseInt(process.env.DB_PORT || '5432', 10),
+  user: process.env.DB_USER || 'ordertracker',
+  password: process.env.DB_PASSWORD || 'devpassword123',
+  database: process.env.DB_NAME || 'ordertracker',
+});
 
 const kafka = new Kafka({
   clientId: `order-api-${ENVIRONMENT}`,
@@ -51,73 +60,114 @@ producer.on(producer.events.REQUEST_TIMEOUT, () => {
 
 connectProducer();
 
-const orders = [];
+pool
+  .query('SELECT NOW()')
+  .then(() => console.log(`[${ENVIRONMENT}] PostgreSQL connected`))
+  .catch((err) => console.error(`[${ENVIRONMENT}] PostgreSQL failed: ${err.message}`));
 
-app.get('/health', (req, res) => {
+async function getDbHealth() {
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+app.get('/health', async (req, res) => {
+  const dbHealthy = await getDbHealth();
+  const countResult = await pool
+    .query('SELECT COUNT(*) FROM orders')
+    .catch(() => ({ rows: [{ count: '0' }] }));
+
   res.json({
-    status: 'healthy',
+    status: dbHealthy && producerReady ? 'healthy' : 'degraded',
     service: SERVICE_NAME,
     environment: ENVIRONMENT,
     kafkaConnected: producerReady,
     kafkaTopic: KAFKA_TOPIC,
-    orderCount: orders.length,
+    dbConnected: dbHealthy,
+    orderCount: Number.parseInt(countResult.rows[0].count, 10),
   });
 });
 
 app.post('/orders', async (req, res) => {
-  const order = {
-    id: `ORD-${Date.now()}`,
-    item: req.body.item,
-    quantity: req.body.quantity,
-    createdAt: new Date().toISOString(),
-    environment: ENVIRONMENT,
-  };
-  orders.push(order);
+  const orderId = `ORD-${Date.now()}`;
 
-  if (producerReady) {
-    try {
-      await producer.send({
-        topic: KAFKA_TOPIC,
-        messages: [
-          {
-            key: order.id,
-            value: JSON.stringify({
-              type: 'NEW_ORDER',
-              orderId: order.id,
-              item: order.item,
-              quantity: order.quantity,
-              environment: ENVIRONMENT,
-              timestamp: order.createdAt,
-            }),
-          },
-        ],
-      });
-      console.log(`[${ENVIRONMENT}] Order ${order.id} published to ${KAFKA_TOPIC}`);
-    } catch (err) {
-      producerReady = false;
-      console.error(`[${ENVIRONMENT}] Failed to publish to Kafka: ${err.message}`);
-      scheduleReconnect();
+  try {
+    const result = await pool.query(
+      `INSERT INTO orders (id, item, quantity, environment)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, item, quantity, environment, created_at AS "createdAt"`,
+      [orderId, req.body.item, req.body.quantity, ENVIRONMENT]
+    );
+
+    const order = result.rows[0];
+
+    if (producerReady) {
+      try {
+        await producer.send({
+          topic: KAFKA_TOPIC,
+          messages: [
+            {
+              key: order.id,
+              value: JSON.stringify({
+                type: 'NEW_ORDER',
+                orderId: order.id,
+                item: order.item,
+                quantity: order.quantity,
+                environment: ENVIRONMENT,
+                timestamp: order.createdAt,
+              }),
+            },
+          ],
+        });
+        console.log(`[${ENVIRONMENT}] Order ${order.id} saved and published to ${KAFKA_TOPIC}`);
+      } catch (err) {
+        producerReady = false;
+        console.error(`[${ENVIRONMENT}] Kafka publish failed: ${err.message}`);
+        scheduleReconnect();
+      }
+    } else {
+      console.log(`[${ENVIRONMENT}] Order ${order.id} saved (Kafka not connected)`);
     }
-  } else {
-    console.log(`[${ENVIRONMENT}] Order ${order.id} created (Kafka not connected)`);
-  }
 
-  res.status(201).json(order);
+    return res.status(201).json(order);
+  } catch (err) {
+    console.error(`[${ENVIRONMENT}] DB insert failed: ${err.message}`);
+    return res.status(500).json({ error: 'Failed to save order' });
+  }
 });
 
-app.get('/orders', (req, res) => {
-  res.json({ environment: ENVIRONMENT, orders });
+app.get('/orders', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, item, quantity, environment, created_at AS "createdAt" FROM orders ORDER BY created_at DESC'
+    );
+    return res.json({ environment: ENVIRONMENT, orders: result.rows });
+  } catch (err) {
+    console.error(`[${ENVIRONMENT}] Failed to fetch orders: ${err.message}`);
+    return res.status(500).json({ error: 'Failed to fetch orders' });
+  }
 });
 
-app.delete('/orders/:id', (req, res) => {
-  const index = orders.findIndex((order) => order.id === req.params.id);
-  if (index === -1) {
-    return res.status(404).json({ error: 'Order not found' });
-  }
+app.delete('/orders/:id', async (req, res) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM orders WHERE id = $1 RETURNING id, item, quantity, environment, created_at AS "createdAt"',
+      [req.params.id]
+    );
 
-  const [removed] = orders.splice(index, 1);
-  console.log(`[${ENVIRONMENT}] Order ${removed.id} deleted`);
-  return res.json(removed);
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    console.log(`[${ENVIRONMENT}] Order ${req.params.id} deleted`);
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error(`[${ENVIRONMENT}] Failed to delete order: ${err.message}`);
+    return res.status(500).json({ error: 'Failed to delete order' });
+  }
 });
 
 const PORT = process.env.PORT || 3000;

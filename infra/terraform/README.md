@@ -127,6 +127,12 @@ Set these as **variables** (not secrets) at the repo or org level:
 | `TF_STATE_BUCKET`       | The S3 bucket `bootstrap/` created                 |
 | `TF_STATE_LOCK_TABLE`   | The DynamoDB table `bootstrap/` created (default: `order-tracker-tf-locks`) |
 
+Set this as a **secret**:
+
+| Name            | Purpose                                                         |
+| --------------- | --------------------------------------------------------------- |
+| `DB_PASSWORD`   | Bootstraps the `db-credentials` secret in `dev` and `staging` for the Postgres apps and service pods |
+
 The OIDC role needs permissions to manage:
 VPC, EC2, EKS, IAM (for cluster/node roles), ECR, S3 (state bucket),
 DynamoDB (lock table), CloudWatch Logs.
