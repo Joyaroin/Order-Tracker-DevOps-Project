@@ -31,6 +31,8 @@ spec:
             - name: orders-staging
               partitions: 1
               replicationFactor: 1
+        persistence:
+          storageClass: gp2
   destination:
     server: https://kubernetes.default.svc
     namespace: kafka
