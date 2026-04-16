@@ -43,6 +43,32 @@ jobs:
             -backend-config="dynamodb_table=${TF_STATE_LOCK_TABLE}" \
             -backend-config="encrypt=true"
 
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ env.AWS_REGION }} \
+            --name ${{ env.CLUSTER_NAME }} || true
+
+      - name: Pre-clean in-cluster workloads and storage
+        run: |
+          kubectl delete application kafka postgres-dev postgres-staging -n argocd --ignore-not-found=true || true
+          kubectl delete applicationset order-tracker-environments -n argocd --ignore-not-found=true || true
+
+          for namespace in dev staging kafka argocd; do
+            echo "Cleaning namespace: $namespace"
+            kubectl delete pvc --all -n "$namespace" --ignore-not-found=true || true
+            kubectl delete all --all -n "$namespace" --ignore-not-found=true || true
+          done
+
+          kubectl delete pv --all --ignore-not-found=true || true
+
+          for namespace in dev staging kafka; do
+            kubectl delete namespace "$namespace" --ignore-not-found=true || true
+          done
+
+          echo "Waiting briefly for Kubernetes-managed AWS resources to start tearing down..."
+          sleep 45
+
       # Cluster-managed ELBs (frontend/staging/argocd LoadBalancers) create
       # AWS load balancers outside Terraform state. If they're still around at
       # destroy time they hold ENIs in the VPC and block subnet deletion.
