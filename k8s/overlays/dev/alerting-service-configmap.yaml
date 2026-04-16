@@ -6,3 +6,6 @@ data:
   SERVICE_NAME: "alerting-service"
   ENVIRONMENT: "dev"
   PORT: "3001"
+  KAFKA_BROKERS: "kafka.kafka.svc.cluster.local:9092"
+  KAFKA_TOPIC: "orders-dev"
+  KAFKA_GROUP_ID: "alerting-service-dev"

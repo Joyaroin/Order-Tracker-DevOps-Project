@@ -7,3 +7,5 @@ data:
   ENVIRONMENT: "dev"
   PORT: "3000"
   ALERTING_SERVICE_URL: "http://alerting-service:3001"
+  KAFKA_BROKERS: "kafka.kafka.svc.cluster.local:9092"
+  KAFKA_TOPIC: "orders-dev"

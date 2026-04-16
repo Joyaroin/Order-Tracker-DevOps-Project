@@ -6,3 +6,6 @@ data:
   SERVICE_NAME: "alerting-service"
   ENVIRONMENT: "staging"
   PORT: "3001"
+  KAFKA_BROKERS: "kafka.kafka.svc.cluster.local:9092"
+  KAFKA_TOPIC: "orders-staging"
+  KAFKA_GROUP_ID: "alerting-service-staging"

@@ -22,6 +22,15 @@ spec:
             protocol: PLAINTEXT
           controller:
             protocol: PLAINTEXT
+        provisioning:
+          enabled: true
+          topics:
+            - name: orders-dev
+              partitions: 1
+              replicationFactor: 1
+            - name: orders-staging
+              partitions: 1
+              replicationFactor: 1
   destination:
     server: https://kubernetes.default.svc
     namespace: kafka
