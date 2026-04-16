@@ -100,8 +100,8 @@ jobs:
           echo "ArgoCD LoadBalancer hostname was not assigned within the timeout."
           exit 1
 
-      - name: Apply ApplicationSet
-        run: kubectl apply -f k8s/argocd/applicationset.yaml
+      - name: Apply ArgoCD applications
+        run: kubectl apply -k k8s/argocd
 
       - name: Wait for frontend URLs
         id: frontend-urls

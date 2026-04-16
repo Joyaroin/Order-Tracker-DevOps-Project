@@ -4,8 +4,8 @@ This directory provisions the AWS infrastructure for the Order Tracker project �
 VPC, EKS cluster, managed node group, and ECR repositories — replacing the
 previous `eksctl`-based workflow.
 
-Application deployment is still handled by ArgoCD + Kustomize; Terraform only
-manages the platform underneath.
+Application deployment is still handled by ArgoCD + Kustomize/Helm; Terraform
+only manages the platform underneath.
 
 ## Layout
 
@@ -108,7 +108,8 @@ starter file.
 Two workflows drive infra lifecycle from CI:
 
 - **`.github/workflows/create-cluster.yml`** — runs `terraform init` + `apply`,
-  then installs ArgoCD and applies the ApplicationSet. This is the workflow
+  then installs ArgoCD and applies the manifests in `k8s/argocd/` (including
+  the environment `ApplicationSet` and shared Kafka app). This is the workflow
   you manually trigger to spin up the cluster.
 - **`.github/workflows/destroy-cluster.yml`** — runs `terraform destroy`. No
   more shell-based VPC dependency cleanup — Terraform handles it because every
