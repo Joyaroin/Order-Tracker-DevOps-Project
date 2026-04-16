@@ -69,6 +69,34 @@ jobs:
           echo "Waiting briefly for Kubernetes-managed AWS resources to start tearing down..."
           sleep 45
 
+      - name: Pre-clean ECR repositories
+        run: |
+          for repo in order-api alerting-service frontend; do
+            echo "Checking ECR repository: $repo"
+
+            if ! aws ecr describe-repositories --repository-names "$repo" --region "$AWS_REGION" >/dev/null 2>&1; then
+              echo "Repository $repo does not exist or is already deleted."
+              continue
+            fi
+
+            IMAGE_IDS=$(aws ecr list-images \
+              --repository-name "$repo" \
+              --region "$AWS_REGION" \
+              --query 'imageIds[*]' \
+              --output json)
+
+            if [ "$IMAGE_IDS" = "[]" ]; then
+              echo "Repository $repo is already empty."
+              continue
+            fi
+
+            echo "$IMAGE_IDS" > /tmp/"$repo"-image-ids.json
+            aws ecr batch-delete-image \
+              --repository-name "$repo" \
+              --region "$AWS_REGION" \
+              --image-ids file:///tmp/"$repo"-image-ids.json || true
+          done
+
       # Cluster-managed ELBs (frontend/staging/argocd LoadBalancers) create
       # AWS load balancers outside Terraform state. If they're still around at
       # destroy time they hold ENIs in the VPC and block subnet deletion.
@@ -105,6 +133,39 @@ jobs:
             echo "Waiting 45s for load balancers and their ENIs to clear..."
             sleep 45
           fi
+
+      - name: Pre-clean leftover VPC dependencies
+        run: |
+          VPC_ID=$(aws eks describe-cluster --name "$CLUSTER_NAME" --region "$AWS_REGION" \
+            --query 'cluster.resourcesVpcConfig.vpcId' --output text 2>/dev/null || true)
+
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "Cluster not found or already gone — nothing to dependency-clean."
+            exit 0
+          fi
+
+          echo "Cleaning remaining ENIs in VPC: $VPC_ID"
+          ENIS=$(aws ec2 describe-network-interfaces --region "$AWS_REGION" \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query 'NetworkInterfaces[?Status==`available`].NetworkInterfaceId' \
+            --output text)
+          for eni in $ENIS; do
+            echo "Deleting ENI: $eni"
+            aws ec2 delete-network-interface --network-interface-id "$eni" --region "$AWS_REGION" || true
+          done
+
+          echo "Cleaning non-default security groups in VPC: $VPC_ID"
+          SGS=$(aws ec2 describe-security-groups --region "$AWS_REGION" \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query 'SecurityGroups[?GroupName!=`default`].GroupId' \
+            --output text)
+          for sg in $SGS; do
+            echo "Deleting security group: $sg"
+            aws ec2 delete-security-group --group-id "$sg" --region "$AWS_REGION" || true
+          done
+
+          echo "Waiting 30s for AWS dependency cleanup to settle..."
+          sleep 30
 
       - name: Terraform Destroy
         working-directory: ${{ env.TF_WORKING_DIR }}
