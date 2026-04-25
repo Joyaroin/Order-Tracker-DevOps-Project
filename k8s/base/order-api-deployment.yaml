@@ -4,6 +4,8 @@ metadata:
   name: order-api
   labels:
     app: order-api
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   replicas: 1
   selector:
@@ -22,6 +24,8 @@ spec:
           envFrom:
             - configMapRef:
                 name: order-api-config
+            - configMapRef:
+                name: db-config
             - secretRef:
                 name: db-credentials
           readinessProbe:

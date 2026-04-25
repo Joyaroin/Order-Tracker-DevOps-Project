@@ -64,6 +64,30 @@ variable "ecr_repository_names" {
   default     = ["order-api", "alerting-service", "frontend"]
 }
 
+variable "db_name" {
+  description = "PostgreSQL database name used by the application."
+  type        = string
+  default     = "ordertracker"
+}
+
+variable "db_username" {
+  description = "PostgreSQL master username used by the application."
+  type        = string
+  default     = "ordertracker"
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class for PostgreSQL."
+  type        = string
+  default     = "db.t3.micro"
+}
+
+variable "db_allocated_storage" {
+  description = "Allocated RDS storage in GiB."
+  type        = number
+  default     = 20
+}
+
 variable "tags" {
   description = "Extra tags applied to all resources."
   type        = map(string)

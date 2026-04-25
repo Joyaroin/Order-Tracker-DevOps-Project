@@ -67,6 +67,10 @@ jobs:
         run: |
           echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
           echo "region=$(terraform output -raw region)" >> $GITHUB_OUTPUT
+          echo "rds_endpoint=$(terraform output -raw rds_endpoint)" >> $GITHUB_OUTPUT
+          echo "rds_port=$(terraform output -raw rds_port)" >> $GITHUB_OUTPUT
+          echo "rds_database_name=$(terraform output -raw rds_database_name)" >> $GITHUB_OUTPUT
+          echo "rds_username=$(terraform output -raw rds_username)" >> $GITHUB_OUTPUT
 
       - name: Configure kubeconfig
         run: |
@@ -100,14 +104,10 @@ jobs:
           echo "ArgoCD LoadBalancer hostname was not assigned within the timeout."
           exit 1
 
-      - name: Bootstrap namespaces and DB secrets
-        env:
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      - name: Bootstrap namespaces and RDS connection
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          if [ -z "$DB_PASSWORD" ]; then
-            echo "GitHub secret DB_PASSWORD is required for Postgres-backed services."
-            exit 1
-          fi
+          DB_PASSWORD="$(terraform output -raw rds_password)"
 
           for namespace in dev staging; do
             kubectl get namespace "$namespace" >/dev/null 2>&1 || kubectl create namespace "$namespace"
@@ -116,14 +116,38 @@ jobs:
               -n "$namespace" \
               --from-literal=DB_PASSWORD="$DB_PASSWORD" \
               --dry-run=client -o yaml | kubectl apply -f -
-          done
 
-      - name: Set default storage class
-        run: |
-          kubectl annotate storageclass gp2 storageclass.kubernetes.io/is-default-class=true --overwrite
+            kubectl create service externalname postgres \
+              -n "$namespace" \
+              --external-name="${{ steps.tf-out.outputs.rds_endpoint }}" \
+              --dry-run=client -o yaml | kubectl apply -f -
+          done
 
       - name: Apply ArgoCD applications
         run: kubectl apply -k k8s/argocd
+
+      - name: Wait for database migrations
+        run: |
+          wait_for_migration() {
+            NAMESPACE="$1"
+
+            echo "Waiting for db-migration job in namespace: $NAMESPACE"
+            for i in $(seq 1 40); do
+              if kubectl get job db-migration -n "$NAMESPACE" >/dev/null 2>&1; then
+                kubectl wait --for=condition=complete --timeout=180s job/db-migration -n "$NAMESPACE"
+                return 0
+              fi
+
+              echo "Attempt $i/40 for $NAMESPACE - migration job not created yet, waiting 15s..."
+              sleep 15
+            done
+
+            echo "db-migration job was not created in namespace $NAMESPACE within the timeout."
+            return 1
+          }
+
+          wait_for_migration dev
+          wait_for_migration staging
 
       - name: Wait for frontend URLs
         id: frontend-urls
@@ -169,8 +193,11 @@ jobs:
           echo "| **Provisioned by** | Terraform |" >> $GITHUB_STEP_SUMMARY
           echo "| **Nodes** | ${{ github.event.inputs.node_count }} x \`${{ github.event.inputs.node_type }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD** | Installed |" >> $GITHUB_STEP_SUMMARY
-          echo "| **PostgreSQL** | Managed by ArgoCD in \`dev\` and \`staging\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **DB secret** | Bootstrapped from GitHub secret \`DB_PASSWORD\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **PostgreSQL** | RDS at \`${{ steps.tf-out.outputs.rds_endpoint }}:${{ steps.tf-out.outputs.rds_port }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **DB name** | \`${{ steps.tf-out.outputs.rds_database_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **DB user** | \`${{ steps.tf-out.outputs.rds_username }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Kubernetes DB alias** | \`postgres\` ExternalName service in \`dev\` and \`staging\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **DB migrations** | \`db-migration\` Job completed in \`dev\` and \`staging\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD URL** | ${{ steps.argocd-url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD password** | \`${{ steps.argocd-password.outputs.password }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Dev frontend** | ${{ steps.frontend-urls.outputs.dev_url }} |" >> $GITHUB_STEP_SUMMARY

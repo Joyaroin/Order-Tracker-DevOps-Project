@@ -10,3 +10,8 @@ node_instance_types = ["t3.medium"]
 node_desired_size   = 2
 node_min_size       = 1
 node_max_size       = 3
+
+db_name              = "ordertracker"
+db_username          = "ordertracker"
+db_instance_class    = "db.t3.micro"
+db_allocated_storage = 20

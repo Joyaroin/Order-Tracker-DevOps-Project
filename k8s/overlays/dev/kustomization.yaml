@@ -5,6 +5,7 @@ namespace: dev
 
 resources:
   - ../../base
+  - db-configmap.yaml
   - order-api-configmap.yaml
   - alerting-service-configmap.yaml
   - frontend-configmap.yaml

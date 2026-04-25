@@ -6,7 +6,3 @@ data:
   SERVICE_NAME: "alerting-service"
   ENVIRONMENT: "dev"
   PORT: "3001"
-  DB_HOST: "postgres-postgresql.dev.svc.cluster.local"
-  DB_PORT: "5432"
-  DB_USER: "ordertracker"
-  DB_NAME: "ordertracker"

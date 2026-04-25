@@ -3,5 +3,3 @@ kind: Kustomization
 
 resources:
   - applicationset.yaml
-  - postgres-dev-application.yaml
-  - postgres-staging-application.yaml

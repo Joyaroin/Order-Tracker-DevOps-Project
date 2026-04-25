@@ -10,7 +10,7 @@ output "lock_table_name" {
 
 output "backend_config_snippet" {
   description = "Drop-in values for the main module's backend.tf."
-  value = <<-EOT
+  value       = <<-EOT
     bucket         = "${aws_s3_bucket.tf_state.bucket}"
     key            = "order-tracker/terraform.tfstate"
     region         = "${var.region}"

@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration
+  labels:
+    app: db-migration
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app: db-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-migration
+          image: postgres:16-alpine
+          envFrom:
+            - configMapRef:
+                name: db-config
+            - secretRef:
+                name: db-credentials
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-credentials
+                  key: DB_PASSWORD
+          command:
+            - sh
+            - -c
+            - |
+              psql \
+                --host="$DB_HOST" \
+                --port="$DB_PORT" \
+                --username="$DB_USER" \
+                --dbname="$DB_NAME" \
+                --file=/migrations/schema.sql
+          volumeMounts:
+            - name: database-schema
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: database-schema
+          configMap:
+            name: database-schema

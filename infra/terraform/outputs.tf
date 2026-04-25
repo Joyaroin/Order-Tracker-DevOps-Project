@@ -46,6 +46,32 @@ output "ecr_repository_urls" {
   }
 }
 
+output "rds_endpoint" {
+  description = "RDS PostgreSQL endpoint hostname."
+  value       = aws_db_instance.app.address
+}
+
+output "rds_port" {
+  description = "RDS PostgreSQL port."
+  value       = aws_db_instance.app.port
+}
+
+output "rds_database_name" {
+  description = "Application database name."
+  value       = aws_db_instance.app.db_name
+}
+
+output "rds_username" {
+  description = "Application database username."
+  value       = aws_db_instance.app.username
+}
+
+output "rds_password" {
+  description = "Generated application database password."
+  value       = random_password.db.result
+  sensitive   = true
+}
+
 output "kubeconfig_command" {
   description = "Command to configure kubectl against the new cluster."
   value       = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"

@@ -15,11 +15,6 @@ module "eks" {
 
   enable_cluster_creator_admin_permissions = true
 
-  # Required for dynamic EBS-backed PVC provisioning used by Postgres.
-  cluster_addons = {
-    aws-ebs-csi-driver = {}
-  }
-
   eks_managed_node_groups = {
     standard-workers = {
       ami_type       = "AL2_x86_64"

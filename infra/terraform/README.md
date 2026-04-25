@@ -1,11 +1,13 @@
 # Terraform Infrastructure
 
 This directory provisions the AWS infrastructure for the Order Tracker project —
-VPC, EKS cluster, managed node group, and ECR repositories — replacing the
+VPC, EKS cluster, managed node group, RDS PostgreSQL, and ECR repositories — replacing the
 previous `eksctl`-based workflow.
 
-Application deployment is still handled by ArgoCD + Kustomize/Helm; Terraform
-only manages the platform underneath.
+Application deployment is still handled by ArgoCD + Kustomize. Terraform
+manages the platform underneath, including the shared RDS database. Database
+tables are created by the `db-migration` Kubernetes Job from
+`k8s/base/database/schema.sql`.
 
 ## Layout
 
@@ -23,8 +25,9 @@ infra/terraform/
 ├── variables.tf          # Inputs
 ├── vpc.tf                # VPC via terraform-aws-modules/vpc/aws
 ├── eks.tf                # EKS cluster + managed node group via terraform-aws-modules/eks/aws
+├── rds.tf                # Private RDS PostgreSQL instance for the services
 ├── ecr.tf                # ECR repos for order-api, alerting-service, frontend
-├── outputs.tf            # Cluster / VPC / ECR outputs
+├── outputs.tf            # Cluster / VPC / RDS / ECR outputs
 ├── terraform.tfvars.example
 └── .gitignore
 ```
@@ -99,6 +102,10 @@ might want to change:
 | `node_desired_size`   | `2`             | Starting node count                         |
 | `node_min_size`       | `1`             | Autoscaling floor                           |
 | `node_max_size`       | `3`             | Autoscaling ceiling                         |
+| `db_instance_class`   | `db.t3.micro`   | RDS PostgreSQL instance size                |
+| `db_allocated_storage` | `20`            | RDS storage in GiB                          |
+| `db_name`             | `ordertracker`  | Application database name                   |
+| `db_username`         | `ordertracker`  | Application database user                   |
 
 See `variables.tf` for the full list and `terraform.tfvars.example` for a
 starter file.
@@ -109,7 +116,7 @@ Two workflows drive infra lifecycle from CI:
 
 - **`.github/workflows/create-cluster.yml`** — runs `terraform init` + `apply`,
   then installs ArgoCD and applies the manifests in `k8s/argocd/` (including
-  the environment `ApplicationSet` and shared Postgres apps). This is the workflow
+  the environment `ApplicationSet`). This is the workflow
   you manually trigger to spin up the cluster.
 - **`.github/workflows/destroy-cluster.yml`** — runs `terraform destroy`. No
   more shell-based VPC dependency cleanup — Terraform handles it because every
@@ -127,14 +134,8 @@ Set these as **variables** (not secrets) at the repo or org level:
 | `TF_STATE_BUCKET`       | The S3 bucket `bootstrap/` created                 |
 | `TF_STATE_LOCK_TABLE`   | The DynamoDB table `bootstrap/` created (default: `order-tracker-tf-locks`) |
 
-Set this as a **secret**:
-
-| Name            | Purpose                                                         |
-| --------------- | --------------------------------------------------------------- |
-| `DB_PASSWORD`   | Bootstraps the `db-credentials` secret in `dev` and `staging` for the Postgres apps and service pods |
-
 The OIDC role needs permissions to manage:
-VPC, EC2, EKS, IAM (for cluster/node roles), ECR, S3 (state bucket),
+VPC, EC2, EKS, IAM (for cluster/node roles), ECR, RDS, S3 (state bucket),
 DynamoDB (lock table), CloudWatch Logs.
 
 ## Assumptions

@@ -6,7 +6,3 @@ data:
   SERVICE_NAME: "alerting-service"
   ENVIRONMENT: "staging"
   PORT: "3001"
-  DB_HOST: "postgres-postgresql.staging.svc.cluster.local"
-  DB_PORT: "5432"
-  DB_USER: "ordertracker"
-  DB_NAME: "ordertracker"
