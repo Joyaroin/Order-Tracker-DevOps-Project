@@ -9,3 +9,4 @@ data:
   DB_PORT: "5432"
   DB_USER: "ordertracker"
   DB_NAME: "ordertracker"
+  DB_SSL: "true"

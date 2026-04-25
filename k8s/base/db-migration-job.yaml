@@ -35,6 +35,8 @@ spec:
                 secretKeyRef:
                   name: db-credentials
                   key: DB_PASSWORD
+            - name: PGSSLMODE
+              value: require
           command:
             - sh
             - -c

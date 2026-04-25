@@ -13,6 +13,7 @@ const pool = new Pool({
   user: process.env.DB_USER || 'ordertracker',
   password: process.env.DB_PASSWORD || 'devpassword123',
   database: process.env.DB_NAME || 'ordertracker',
+  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
 });
 
 pool
