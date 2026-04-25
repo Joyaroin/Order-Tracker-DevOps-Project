@@ -17,6 +17,13 @@ spec:
       containers:
         - name: db-migration
           image: postgres:16-alpine
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           envFrom:
             - configMapRef:
                 name: db-config

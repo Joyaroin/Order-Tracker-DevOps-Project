@@ -21,6 +21,13 @@ spec:
           image: alerting-service:latest
           ports:
             - containerPort: 3001
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
           envFrom:
             - configMapRef:
                 name: alerting-service-config
