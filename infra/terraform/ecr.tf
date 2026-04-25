@@ -1,9 +1,3 @@
-import {
-  for_each = toset(["alerting-service", "frontend", "order-api"])
-  to       = aws_ecr_repository.app[each.value]
-  id       = each.value
-}
-
 resource "aws_ecr_repository" "app" {
   for_each = toset(var.ecr_repository_names)
 
