@@ -8,5 +8,5 @@ data:
   DB_HOST: "postgres"
   DB_PORT: "5432"
   DB_USER: "ordertracker"
-  DB_NAME: "ordertracker"
+  DB_NAME: "ordertracker_dev"
   DB_SSL: "true"
