@@ -3,6 +3,5 @@ kind: Kustomization
 
 resources:
   - applicationset.yaml
-  - kafka-application.yaml
   - postgres-dev-application.yaml
   - postgres-staging-application.yaml

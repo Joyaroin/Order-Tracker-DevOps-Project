@@ -51,10 +51,10 @@ jobs:
 
       - name: Pre-clean in-cluster workloads and storage
         run: |
-          kubectl delete application kafka postgres-dev postgres-staging -n argocd --ignore-not-found=true || true
+          kubectl delete application postgres-dev postgres-staging -n argocd --ignore-not-found=true || true
           kubectl delete applicationset order-tracker-environments -n argocd --ignore-not-found=true || true
 
-          for namespace in dev staging kafka argocd; do
+          for namespace in dev staging argocd; do
             echo "Cleaning namespace: $namespace"
             kubectl delete pvc --all -n "$namespace" --ignore-not-found=true || true
             kubectl delete all --all -n "$namespace" --ignore-not-found=true || true
@@ -62,7 +62,7 @@ jobs:
 
           kubectl delete pv --all --ignore-not-found=true || true
 
-          for namespace in dev staging kafka; do
+          for namespace in dev staging; do
             kubectl delete namespace "$namespace" --ignore-not-found=true || true
           done
 

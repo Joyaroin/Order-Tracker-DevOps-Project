@@ -7,7 +7,7 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO alerts (id, type, order_id, item, environment, source, received_at)
 VALUES
-  ('ALT-STG-2001', 'NEW_ORDER', 'ORD-STG-1001', 'laptop stand', 'staging', 'orders-staging (partition 0)', '2026-04-16 10:00:03'),
-  ('ALT-STG-2002', 'NEW_ORDER', 'ORD-STG-1002', 'noise-cancelling headset', 'staging', 'orders-staging (partition 0)', '2026-04-16 10:20:05'),
-  ('ALT-STG-2003', 'NEW_ORDER', 'ORD-STG-1003', 'webcam light', 'staging', 'orders-staging (partition 0)', '2026-04-16 10:40:04')
+  ('ALT-STG-2001', 'NEW_ORDER', 'ORD-STG-1001', 'laptop stand', 'staging', 'order-api', '2026-04-16 10:00:03'),
+  ('ALT-STG-2002', 'NEW_ORDER', 'ORD-STG-1002', 'noise-cancelling headset', 'staging', 'order-api', '2026-04-16 10:20:05'),
+  ('ALT-STG-2003', 'NEW_ORDER', 'ORD-STG-1003', 'webcam light', 'staging', 'order-api', '2026-04-16 10:40:04')
 ON CONFLICT (id) DO NOTHING;

@@ -1,5 +1,4 @@
 const express = require('express');
-const { Kafka, logLevel } = require('kafkajs');
 const { Pool } = require('pg');
 
 const app = express();
@@ -7,9 +6,6 @@ app.use(express.json());
 
 const SERVICE_NAME = process.env.SERVICE_NAME || 'alerting-service';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'unknown';
-const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'localhost:9092').split(',');
-const KAFKA_TOPIC = process.env.KAFKA_TOPIC || `orders-${ENVIRONMENT}`;
-const KAFKA_GROUP_ID = process.env.KAFKA_GROUP_ID || `alerting-service-${ENVIRONMENT}`;
 
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
@@ -18,91 +14,6 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD || 'devpassword123',
   database: process.env.DB_NAME || 'ordertracker',
 });
-
-const kafka = new Kafka({
-  clientId: `alerting-service-${ENVIRONMENT}`,
-  brokers: KAFKA_BROKERS,
-  logLevel: logLevel.NOTHING,
-});
-
-const consumer = kafka.consumer({ groupId: KAFKA_GROUP_ID });
-let consumerReady = false;
-let consumerStarted = false;
-let restartTimer = null;
-
-function scheduleConsumerRestart() {
-  if (restartTimer) return;
-  restartTimer = setTimeout(() => {
-    restartTimer = null;
-    startConsumer();
-  }, 5000);
-}
-
-async function startConsumer() {
-  if (consumerStarted) return;
-  consumerStarted = true;
-
-  try {
-    await consumer.connect();
-    await consumer.subscribe({ topic: KAFKA_TOPIC, fromBeginning: false });
-    consumerReady = true;
-
-    console.log(
-      `[${ENVIRONMENT}] Kafka consumer connected, topic: ${KAFKA_TOPIC}, group: ${KAFKA_GROUP_ID}`
-    );
-
-    await consumer.run({
-      eachMessage: async ({ topic, partition, message }) => {
-        const event = JSON.parse(message.value.toString());
-
-        try {
-          await pool.query(
-            `INSERT INTO alerts (id, type, order_id, item, environment, source)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [
-              `ALT-${Date.now()}`,
-              event.type,
-              event.orderId,
-              event.item,
-              ENVIRONMENT,
-              `${topic} (partition ${partition})`,
-            ]
-          );
-          console.log(
-            `[${ENVIRONMENT}] Alert saved: ${event.type} for order ${event.orderId} via ${topic}`
-          );
-        } catch (err) {
-          console.error(`[${ENVIRONMENT}] Alert DB insert failed: ${err.message}`);
-        }
-      },
-    });
-  } catch (err) {
-    consumerReady = false;
-    console.error(`[${ENVIRONMENT}] Kafka consumer connection failed: ${err.message}`);
-    try {
-      await consumer.disconnect();
-    } catch (disconnectErr) {
-      console.error(
-        `[${ENVIRONMENT}] Kafka consumer disconnect cleanup failed: ${disconnectErr.message}`
-      );
-    }
-    consumerStarted = false;
-    scheduleConsumerRestart();
-  }
-}
-
-consumer.on(consumer.events.CRASH, () => {
-  consumerReady = false;
-  consumerStarted = false;
-  scheduleConsumerRestart();
-});
-
-consumer.on(consumer.events.DISCONNECT, () => {
-  consumerReady = false;
-  consumerStarted = false;
-});
-
-startConsumer();
 
 pool
   .query('SELECT NOW()')
@@ -125,12 +36,9 @@ app.get('/health', async (req, res) => {
     .catch(() => ({ rows: [{ count: '0' }] }));
 
   res.json({
-    status: dbHealthy && consumerReady ? 'healthy' : 'degraded',
+    status: dbHealthy ? 'healthy' : 'degraded',
     service: SERVICE_NAME,
     environment: ENVIRONMENT,
-    kafkaConnected: consumerReady,
-    kafkaTopic: KAFKA_TOPIC,
-    kafkaGroupId: KAFKA_GROUP_ID,
     dbConnected: dbHealthy,
     alertCount: Number.parseInt(countResult.rows[0].count, 10),
   });

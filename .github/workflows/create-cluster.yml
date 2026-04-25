@@ -169,7 +169,6 @@ jobs:
           echo "| **Provisioned by** | Terraform |" >> $GITHUB_STEP_SUMMARY
           echo "| **Nodes** | ${{ github.event.inputs.node_count }} x \`${{ github.event.inputs.node_type }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD** | Installed |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Kafka** | Managed by ArgoCD |" >> $GITHUB_STEP_SUMMARY
           echo "| **PostgreSQL** | Managed by ArgoCD in \`dev\` and \`staging\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **DB secret** | Bootstrapped from GitHub secret \`DB_PASSWORD\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **ArgoCD URL** | ${{ steps.argocd-url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY

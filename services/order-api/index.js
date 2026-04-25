@@ -1,5 +1,4 @@
 const express = require('express');
-const { Kafka, logLevel } = require('kafkajs');
 const { Pool } = require('pg');
 
 const app = express();
@@ -7,8 +6,6 @@ app.use(express.json());
 
 const SERVICE_NAME = process.env.SERVICE_NAME || 'order-api';
 const ENVIRONMENT = process.env.ENVIRONMENT || 'unknown';
-const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || 'localhost:9092').split(',');
-const KAFKA_TOPIC = process.env.KAFKA_TOPIC || `orders-${ENVIRONMENT}`;
 
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
@@ -17,48 +14,6 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD || 'devpassword123',
   database: process.env.DB_NAME || 'ordertracker',
 });
-
-const kafka = new Kafka({
-  clientId: `order-api-${ENVIRONMENT}`,
-  brokers: KAFKA_BROKERS,
-  logLevel: logLevel.NOTHING,
-});
-
-const producer = kafka.producer();
-let producerReady = false;
-let reconnectTimer = null;
-
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectProducer();
-  }, 5000);
-}
-
-async function connectProducer() {
-  try {
-    await producer.connect();
-    producerReady = true;
-    console.log(`[${ENVIRONMENT}] Kafka producer connected, topic: ${KAFKA_TOPIC}`);
-  } catch (err) {
-    producerReady = false;
-    console.error(`[${ENVIRONMENT}] Kafka producer connection failed: ${err.message}`);
-    scheduleReconnect();
-  }
-}
-
-producer.on(producer.events.DISCONNECT, () => {
-  producerReady = false;
-  console.log(`[${ENVIRONMENT}] Kafka producer disconnected`);
-  scheduleReconnect();
-});
-
-producer.on(producer.events.REQUEST_TIMEOUT, () => {
-  producerReady = false;
-});
-
-connectProducer();
 
 pool
   .query('SELECT NOW()')
@@ -81,11 +36,9 @@ app.get('/health', async (req, res) => {
     .catch(() => ({ rows: [{ count: '0' }] }));
 
   res.json({
-    status: dbHealthy && producerReady ? 'healthy' : 'degraded',
+    status: dbHealthy ? 'healthy' : 'degraded',
     service: SERVICE_NAME,
     environment: ENVIRONMENT,
-    kafkaConnected: producerReady,
-    kafkaTopic: KAFKA_TOPIC,
     dbConnected: dbHealthy,
     orderCount: Number.parseInt(countResult.rows[0].count, 10),
   });
@@ -93,9 +46,12 @@ app.get('/health', async (req, res) => {
 
 app.post('/orders', async (req, res) => {
   const orderId = `ORD-${Date.now()}`;
+  const client = await pool.connect();
 
   try {
-    const result = await pool.query(
+    await client.query('BEGIN');
+
+    const result = await client.query(
       `INSERT INTO orders (id, item, quantity, environment)
        VALUES ($1, $2, $3, $4)
        RETURNING id, item, quantity, environment, created_at AS "createdAt"`,
@@ -104,38 +60,22 @@ app.post('/orders', async (req, res) => {
 
     const order = result.rows[0];
 
-    if (producerReady) {
-      try {
-        await producer.send({
-          topic: KAFKA_TOPIC,
-          messages: [
-            {
-              key: order.id,
-              value: JSON.stringify({
-                type: 'NEW_ORDER',
-                orderId: order.id,
-                item: order.item,
-                quantity: order.quantity,
-                environment: ENVIRONMENT,
-                timestamp: order.createdAt,
-              }),
-            },
-          ],
-        });
-        console.log(`[${ENVIRONMENT}] Order ${order.id} saved and published to ${KAFKA_TOPIC}`);
-      } catch (err) {
-        producerReady = false;
-        console.error(`[${ENVIRONMENT}] Kafka publish failed: ${err.message}`);
-        scheduleReconnect();
-      }
-    } else {
-      console.log(`[${ENVIRONMENT}] Order ${order.id} saved (Kafka not connected)`);
-    }
+    await client.query(
+      `INSERT INTO alerts (id, type, order_id, item, environment, source)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [`ALT-${Date.now()}`, 'NEW_ORDER', order.id, order.item, ENVIRONMENT, 'order-api']
+    );
+
+    await client.query('COMMIT');
+    console.log(`[${ENVIRONMENT}] Order ${order.id} saved and alert created`);
 
     return res.status(201).json(order);
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error(`[${ENVIRONMENT}] DB insert failed: ${err.message}`);
     return res.status(500).json({ error: 'Failed to save order' });
+  } finally {
+    client.release();
   }
 });
 

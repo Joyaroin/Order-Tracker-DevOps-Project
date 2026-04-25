@@ -109,7 +109,7 @@ Two workflows drive infra lifecycle from CI:
 
 - **`.github/workflows/create-cluster.yml`** — runs `terraform init` + `apply`,
   then installs ArgoCD and applies the manifests in `k8s/argocd/` (including
-  the environment `ApplicationSet` and shared Kafka app). This is the workflow
+  the environment `ApplicationSet` and shared Postgres apps). This is the workflow
   you manually trigger to spin up the cluster.
 - **`.github/workflows/destroy-cluster.yml`** — runs `terraform destroy`. No
   more shell-based VPC dependency cleanup — Terraform handles it because every
