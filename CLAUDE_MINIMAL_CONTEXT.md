@@ -9,10 +9,10 @@ Small DevOps/portfolio project with:
 - `services/order-api`: Express API for CRUD-ish order actions, in-memory only
 - `services/alerting-service`: Express API that stores alerts in memory
 - `services/frontend`: CRA React app served by nginx, polls both APIs
-- `k8s/`: Kubernetes base + Kustomize overlays for `dev`, `staging`, and hotfix envs
+- `k8s/`: Kubernetes base + Kustomize overlays for `dev` and `staging`
 - `k8s/argocd/applicationset.yaml`: ArgoCD ApplicationSet that deploys overlays
 - `infra/terraform/`: AWS infra for VPC + EKS + ECR, with S3/DynamoDB remote state
-- `.github/workflows/`: CI/CD for image build/push, cluster create/destroy, ephemeral envs
+- `.github/workflows/`: CI/CD for image build/push and cluster create/destroy
 
 ## Runtime Architecture
 
@@ -99,7 +99,6 @@ Overlays:
 
 - `dev`: namespace `dev`, frontend `LoadBalancer`, order-api replicas `2`
 - `staging`: namespace `staging`, frontend `LoadBalancer`
-- `hotfix-*`: ephemeral env pattern copied from `dev`
 
 Config is injected by ConfigMaps, mainly:
 
@@ -115,11 +114,6 @@ Image tags are pinned in each overlay `kustomization.yaml` and updated by GitHub
 
 - `k8s/overlays/dev`
 - `k8s/overlays/staging`
-- `k8s/overlays/hotfix-*`
-
-Notable quirk:
-
-- It explicitly excludes `k8s/overlays/hotfix-123`, so that folder is example/legacy and should not deploy.
 
 ## Terraform Model
 
@@ -166,21 +160,10 @@ Remote state:
 - `terraform-plan.yml`
   - PRs touching `infra/terraform/**`
 
-### Ephemeral env workflows
-
-- `create-hotfix-branch.yml`: makes `hotfix/<name>` branch
-- `create-ephemeral-env.yml`: on push to `hotfix/**`
-  - builds/pushes images
-  - copies `k8s/overlays/dev` to new overlay on `main`
-  - updates namespace/env/tag
-- `destroy-ephemeral-env.yml`: on branch delete
-  - removes overlay from `main`
-
 Notable inconsistency:
 
 - `build-push-ecr.yml` uses static AWS access keys
 - Terraform/cluster workflows use OIDC role assumption
-- `create-ephemeral-env.yml` still uses `secrets.EKS_CLUSTER_NAME` for kubeconfig, while Terraform workflows hardcode/use `k8s-learning`
 
 ## Current Project Constraints / Risks
 
@@ -189,7 +172,6 @@ Notable inconsistency:
 - Frontend tests are default CRA deps only; no meaningful coverage found
 - CI mutates tracked manifests on `main`
 - Some workflow auth/config patterns are inconsistent
-- `hotfix-123` exists in repo as sample state and is excluded by ArgoCD
 
 ## If You Need To Change Something
 

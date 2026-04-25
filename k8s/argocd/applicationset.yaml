@@ -11,9 +11,6 @@ spec:
         directories:
           - path: k8s/overlays/dev
           - path: k8s/overlays/staging
-          - path: k8s/overlays/hotfix-*
-          - path: k8s/overlays/hotfix-123
-            exclude: true
   template:
     metadata:
       name: 'order-tracker-{{path.basename}}'
