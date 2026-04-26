@@ -51,14 +51,25 @@ jobs:
 
       - name: Pre-clean in-cluster workloads and storage
         run: |
-          kubectl delete application postgres-dev postgres-staging -n argocd --ignore-not-found=true || true
           kubectl delete applicationset order-tracker-environments -n argocd --ignore-not-found=true || true
 
-          for namespace in dev staging argocd; do
-            echo "Cleaning namespace: $namespace"
-            kubectl delete pvc --all -n "$namespace" --ignore-not-found=true || true
-            kubectl delete all --all -n "$namespace" --ignore-not-found=true || true
+          for app in order-tracker-dev order-tracker-staging postgres-dev postgres-staging; do
+            kubectl patch application "$app" -n argocd --type merge -p '{"metadata":{"finalizers":[]}}' || true
+            kubectl delete application "$app" -n argocd --ignore-not-found=true || true
           done
+
+          for namespace in dev staging; do
+            echo "Deleting application resources in namespace: $namespace"
+            kubectl delete jobs.batch --all -n "$namespace" --ignore-not-found=true || true
+            kubectl delete deployments.apps,statefulsets.apps,daemonsets.apps,replicasets.apps --all -n "$namespace" --ignore-not-found=true || true
+            kubectl delete svc --all -n "$namespace" --ignore-not-found=true || true
+            kubectl delete configmap,secret --all -n "$namespace" --ignore-not-found=true || true
+            kubectl delete pvc --all -n "$namespace" --ignore-not-found=true || true
+          done
+
+          kubectl delete svc --all -n argocd --ignore-not-found=true || true
+          kubectl delete deployments.apps,statefulsets.apps,replicasets.apps --all -n argocd --ignore-not-found=true || true
+          kubectl delete jobs.batch --all -n argocd --ignore-not-found=true || true
 
           kubectl delete pv --all --ignore-not-found=true || true
 
@@ -67,7 +78,7 @@ jobs:
           done
 
           echo "Waiting briefly for Kubernetes-managed AWS resources to start tearing down..."
-          sleep 45
+          sleep 60
 
       - name: Pre-clean ECR repositories
         run: |
@@ -113,26 +124,33 @@ jobs:
 
           echo "Found cluster VPC: $VPC_ID"
 
-          CLBS=$(aws elb describe-load-balancers --region "$AWS_REGION" \
-            --query "LoadBalancerDescriptions[?VPCId=='$VPC_ID'].LoadBalancerName" \
-            --output text)
-          for lb in $CLBS; do
-            echo "Deleting classic LB: $lb"
-            aws elb delete-load-balancer --load-balancer-name "$lb" --region "$AWS_REGION" || true
+          for attempt in $(seq 1 10); do
+            CLBS=$(aws elb describe-load-balancers --region "$AWS_REGION" \
+              --query "LoadBalancerDescriptions[?VPCId=='$VPC_ID'].LoadBalancerName" \
+              --output text)
+            for lb in $CLBS; do
+              echo "Deleting classic LB: $lb"
+              aws elb delete-load-balancer --load-balancer-name "$lb" --region "$AWS_REGION" || true
+            done
+
+            ALBS=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" \
+              --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+              --output text)
+            for alb in $ALBS; do
+              echo "Deleting ALB/NLB: $alb"
+              aws elbv2 delete-load-balancer --load-balancer-arn "$alb" --region "$AWS_REGION" || true
+            done
+
+            if [ -z "$CLBS" ] && [ -z "$ALBS" ]; then
+              echo "No cluster-managed load balancers remain."
+              exit 0
+            fi
+
+            echo "Attempt $attempt/10 - waiting 30s for load balancers and ENIs to clear..."
+            sleep 30
           done
 
-          ALBS=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" \
-            --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
-            --output text)
-          for alb in $ALBS; do
-            echo "Deleting ALB/NLB: $alb"
-            aws elbv2 delete-load-balancer --load-balancer-arn "$alb" --region "$AWS_REGION" || true
-          done
-
-          if [ -n "$CLBS" ] || [ -n "$ALBS" ]; then
-            echo "Waiting 45s for load balancers and their ENIs to clear..."
-            sleep 45
-          fi
+          echo "Load balancer cleanup timed out; Terraform destroy will retry dependency cleanup."
 
       - name: Pre-clean leftover VPC dependencies
         run: |
@@ -144,7 +162,7 @@ jobs:
             exit 0
           fi
 
-          echo "Cleaning remaining ENIs in VPC: $VPC_ID"
+          echo "Cleaning available ENIs in VPC: $VPC_ID"
           ENIS=$(aws ec2 describe-network-interfaces --region "$AWS_REGION" \
             --filters "Name=vpc-id,Values=$VPC_ID" \
             --query 'NetworkInterfaces[?Status==`available`].NetworkInterfaceId' \
@@ -154,20 +172,58 @@ jobs:
             aws ec2 delete-network-interface --network-interface-id "$eni" --region "$AWS_REGION" || true
           done
 
-          echo "Cleaning non-default security groups in VPC: $VPC_ID"
-          SGS=$(aws ec2 describe-security-groups --region "$AWS_REGION" \
-            --filters "Name=vpc-id,Values=$VPC_ID" \
-            --query 'SecurityGroups[?GroupName!=`default`].GroupId' \
-            --output text)
-          for sg in $SGS; do
-            echo "Deleting security group: $sg"
-            aws ec2 delete-security-group --group-id "$sg" --region "$AWS_REGION" || true
-          done
-
           echo "Waiting 30s for AWS dependency cleanup to settle..."
           sleep 30
 
       - name: Terraform Destroy
+        id: terraform-destroy
+        continue-on-error: true
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform destroy -auto-approve \
+            -var="region=${AWS_REGION}" \
+            -var="cluster_name=${CLUSTER_NAME}"
+
+      - name: Retry cleanup after failed destroy
+        if: steps.terraform-destroy.outcome == 'failure'
+        run: |
+          VPC_ID=$(aws ec2 describe-vpcs --region "$AWS_REGION" \
+            --filters "Name=tag:Name,Values=order-tracker-vpc" \
+            --query 'Vpcs[0].VpcId' --output text 2>/dev/null || true)
+
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+            echo "Project VPC not found; skipping retry cleanup."
+            exit 0
+          fi
+
+          echo "Retry cleanup for VPC: $VPC_ID"
+
+          CLBS=$(aws elb describe-load-balancers --region "$AWS_REGION" \
+            --query "LoadBalancerDescriptions[?VPCId=='$VPC_ID'].LoadBalancerName" \
+            --output text)
+          for lb in $CLBS; do
+            aws elb delete-load-balancer --load-balancer-name "$lb" --region "$AWS_REGION" || true
+          done
+
+          ALBS=$(aws elbv2 describe-load-balancers --region "$AWS_REGION" \
+            --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+            --output text)
+          for alb in $ALBS; do
+            aws elbv2 delete-load-balancer --load-balancer-arn "$alb" --region "$AWS_REGION" || true
+          done
+
+          sleep 60
+
+          ENIS=$(aws ec2 describe-network-interfaces --region "$AWS_REGION" \
+            --filters "Name=vpc-id,Values=$VPC_ID" \
+            --query 'NetworkInterfaces[?Status==`available`].NetworkInterfaceId' \
+            --output text)
+          for eni in $ENIS; do
+            aws ec2 delete-network-interface --network-interface-id "$eni" --region "$AWS_REGION" || true
+          done
+
+      - name: Terraform Destroy Retry
+        if: steps.terraform-destroy.outcome == 'failure'
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform destroy -auto-approve \
