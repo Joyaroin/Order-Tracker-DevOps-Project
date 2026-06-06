@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: frontend-config
+data:
+  REACT_APP_ENVIRONMENT: {{ .Values.environment | quote }}
+  ORDER_API_URL: "http://order-api:{{ .Values.orderApi.port }}"
+  ALERTING_SERVICE_URL: "http://alerting-service:{{ .Values.alertingService.port }}"

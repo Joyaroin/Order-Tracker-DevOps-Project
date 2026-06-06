@@ -1,0 +1,11 @@
+environment: dev
+
+database:
+  name: ordertracker_dev
+
+orderApi:
+  replicas: 2
+
+frontend:
+  service:
+    type: LoadBalancer

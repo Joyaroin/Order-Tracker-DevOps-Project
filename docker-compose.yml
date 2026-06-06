@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: ordertracker-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ordertracker
+      POSTGRES_PASSWORD: ordertracker
+      POSTGRES_DB: ordertracker_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - ordertracker_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ordertracker -d ordertracker_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ordertracker-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - ordertracker_pgadmin:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  ordertracker_pgdata:
+  ordertracker_pgadmin:

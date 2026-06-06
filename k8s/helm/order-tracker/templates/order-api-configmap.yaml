@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-api-config
+data:
+  SERVICE_NAME: "order-api"
+  ENVIRONMENT: {{ .Values.environment | quote }}
+  PORT: {{ .Values.orderApi.port | quote }}
+  ALERTING_SERVICE_URL: "http://alerting-service:{{ .Values.alertingService.port }}"

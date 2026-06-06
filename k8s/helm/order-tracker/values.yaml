@@ -1,0 +1,44 @@
+environment: dev
+
+imageRegistry: 284495577709.dkr.ecr.us-east-2.amazonaws.com
+imageTag: "9c3b51b0d08138b242ed4d54eec24e636dfd9865"
+
+database:
+  host: postgres
+  port: "5432"
+  user: ordertracker
+  name: ordertracker_dev
+  ssl: "true"
+  credentialsSecret: db-credentials
+
+orderApi:
+  replicas: 1
+  image:
+    repository: order-api
+    tag: ""
+  port: 3000
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+alertingService:
+  replicas: 1
+  image:
+    repository: alerting-service
+    tag: ""
+  port: 3001
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+
+frontend:
+  replicas: 1
+  image:
+    repository: frontend
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits:   { cpu: 250m, memory: 128Mi }

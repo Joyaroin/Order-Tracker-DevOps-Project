@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-api
+  labels:
+    app: order-api
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  replicas: {{ .Values.orderApi.replicas }}
+  selector:
+    matchLabels:
+      app: order-api
+  template:
+    metadata:
+      labels:
+        app: order-api
+    spec:
+      containers:
+        - name: order-api
+          image: {{ include "ot.image" (dict "ctx" . "svc" .Values.orderApi) }}
+          ports:
+            - containerPort: {{ .Values.orderApi.port }}
+          resources:
+            {{- toYaml .Values.orderApi.resources | nindent 12 }}
+          envFrom:
+            - configMapRef:
+                name: order-api-config
+            - configMapRef:
+                name: db-config
+            - secretRef:
+                name: {{ .Values.database.credentialsSecret }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.orderApi.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.orderApi.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 30

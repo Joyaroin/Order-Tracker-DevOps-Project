@@ -1,0 +1,6 @@
+apiVersion: v2
+name: order-tracker
+description: Order Tracker app (order-api + alerting-service + frontend) with DB migration job
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

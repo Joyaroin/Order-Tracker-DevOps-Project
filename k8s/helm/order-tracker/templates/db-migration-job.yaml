@@ -1,0 +1,69 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migration
+  labels:
+    app: db-migration
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app: db-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: db-migration
+          image: postgres:16-alpine
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          envFrom:
+            - configMapRef:
+                name: db-config
+            - secretRef:
+                name: {{ .Values.database.credentialsSecret }}
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.credentialsSecret }}
+                  key: DB_PASSWORD
+            - name: PGSSLMODE
+              value: require
+          command:
+            - sh
+            - -c
+            - |
+              if ! psql \
+                --host="$DB_HOST" \
+                --port="$DB_PORT" \
+                --username="$DB_USER" \
+                --dbname=postgres \
+                --tuples-only \
+                --command="SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
+                createdb \
+                  --host="$DB_HOST" \
+                  --port="$DB_PORT" \
+                  --username="$DB_USER" \
+                  "$DB_NAME"
+              fi
+
+              psql \
+                --host="$DB_HOST" \
+                --port="$DB_PORT" \
+                --username="$DB_USER" \
+                --dbname="$DB_NAME" \
+                --file=/migrations/schema.sql
+          volumeMounts:
+            - name: database-schema
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: database-schema
+          configMap:
+            name: database-schema

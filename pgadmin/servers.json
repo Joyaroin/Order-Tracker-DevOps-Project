@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Order Tracker (local)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "ordertracker_dev",
+      "Username": "ordertracker",
+      "SSLMode": "prefer"
+    }
+  }
+}

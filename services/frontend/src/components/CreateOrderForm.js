@@ -1,30 +1,25 @@
 import { useState } from 'react';
+import { useCreateOrder } from '../hooks/useOrderMutations';
 
 export default function CreateOrderForm({ onSuccess, onError }) {
   const [item, setItem] = useState('');
   const [quantity, setQuantity] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const { createOrder, submitting } = useCreateOrder();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!item.trim() || !quantity) return;
 
-    setSubmitting(true);
     try {
-      const res = await fetch('/api/orders/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item: item.trim(), quantity: parseInt(quantity, 10) }),
+      const order = await createOrder({
+        item: item.trim(),
+        quantity: parseInt(quantity, 10),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const order = await res.json();
       setItem('');
       setQuantity('');
       onSuccess(`Order ${order.id} created`);
     } catch (err) {
       onError(`Failed to create order: ${err.message}`);
-    } finally {
-      setSubmitting(false);
     }
   };
 

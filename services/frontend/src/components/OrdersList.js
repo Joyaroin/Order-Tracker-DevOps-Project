@@ -1,21 +1,17 @@
-import { useState } from 'react';
 import usePolling from '../hooks/usePolling';
+import { useDeleteOrder } from '../hooks/useOrderMutations';
 
 export default function OrdersList({ onSuccess, onError }) {
   const { data, error, loading } = usePolling('/api/orders/orders', 5000);
   const orders = data?.orders ? [...data.orders].reverse() : [];
-  const [deleting, setDeleting] = useState(null);
+  const { deleteOrder, deletingId } = useDeleteOrder();
 
   const handleDelete = async (id) => {
-    setDeleting(id);
     try {
-      const res = await fetch(`/api/orders/orders/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await deleteOrder(id);
       onSuccess(`Order ${id} deleted`);
     } catch (err) {
       onError(`Failed to delete: ${err.message}`);
-    } finally {
-      setDeleting(null);
     }
   };
 
@@ -73,10 +69,10 @@ export default function OrdersList({ onSuccess, onError }) {
                   <td className="py-2">
                     <button
                       onClick={() => handleDelete(order.id)}
-                      disabled={deleting === order.id}
+                      disabled={deletingId === order.id}
                       className="text-xs text-red-400 hover:text-red-600 disabled:opacity-50 transition-colors"
                     >
-                      {deleting === order.id ? '...' : 'Delete'}
+                      {deletingId === order.id ? '...' : 'Delete'}
                     </button>
                   </td>
                 </tr>

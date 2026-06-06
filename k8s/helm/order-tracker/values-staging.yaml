@@ -1,0 +1,8 @@
+environment: staging
+
+database:
+  name: ordertracker_staging
+
+frontend:
+  service:
+    type: LoadBalancer
